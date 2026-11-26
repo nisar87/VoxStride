@@ -12,6 +12,13 @@
 - **Editing while you speak:** "scratch that" removes your last sentence, "replace that with …" replaces it, and "never mind" cancels. You can also correct the text in the box and press Run.
 - If VoxStride isn't sure you meant to finish (for example, you dictated the word "execute"), it asks **"Ready to execute?"**. Click **Proceed** to confirm.
 
+## 2a. If VoxStride doesn't understand your accent
+Open **Voice**, tick **Use cloud speech recognition**, choose **Automatic** (or OpenAI/Gemini), click **Save**, and restart when asked. This needs an OpenAI or Gemini key under Reasoning providers. It handles accented English and mixed Urdu/English much better than the built-in Windows engine. Your voice is sent only while you're giving an instruction, never in standby. If it misses quiet speech, move **Mic sensitivity** to the left.
+To finish you can also say **"VoxStride, chalo"** or **"VoxStride, karo"**. Small accent differences in "VoxStride, execute" are understood.
+
+## 2b. A more natural voice
+Under **Voice → How VoxStride sounds**, tick **Natural human-like voice** (needs an OpenAI key) and pick a voice. VoxStride replies conversationally in the language you speak. With an AI key you can also just chat or ask questions.
+
 ## 3. What it can do
 
 | Say | What happens |
@@ -37,6 +44,9 @@ Changes to your files show an approval window with the exact list of what will h
 - History keeps results, not your words, unless you turn on **Keep my instruction text**.
 - **Mute** (Ctrl+Alt+M) closes the microphone. **Clear history** and **Revoke all** are under Privacy.
 - API keys are stored in Windows Credential Manager. The uninstaller can remove them.
+
+## 6a. Updates
+VoxStride checks GitHub for new versions, verifies each download's checksum, and installs updates by itself when you aren't using it. Afterwards it restarts on the new version. You can turn this off or click **Check for updates** under **About & diagnostics**.
 
 ## 7. Troubleshooting
 - **"No Windows speech recognizer is installed"**: go to Windows Settings › Time & language › Speech and add English speech recognition, or use typed commands.
