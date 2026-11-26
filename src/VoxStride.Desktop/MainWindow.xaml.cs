@@ -160,6 +160,10 @@ public partial class MainWindow : Window
             ? "No Windows speech recognizer is installed. Install an English speech pack (Settings › Time & language › Speech) to use voice. Typed commands still work."
             : $"Installed recognizers: {string.Join(", ", cultures)}. Voices: {voices.Count}.";
 
+        var mics = new List<string> { "Windows default microphone" };
+        mics.AddRange(WaveInRecorder.Devices());
+        MicBox.ItemsSource = mics;
+        MicBox.SelectedItem = s.MicrophoneName is { } mn && mics.Contains(mn) ? mn : mics[0];
         CloudSpeechBox.IsChecked = s.CloudSpeechConsent;
         foreach (ComboBoxItem item in EngineBox.Items) if ((string)item.Tag == s.SpeechEngine.ToString()) EngineBox.SelectedItem = item;
         SensitivitySlider.Value = s.MicSensitivity;
@@ -279,7 +283,8 @@ public partial class MainWindow : Window
         s.SpeakResults = SpeakBox.IsChecked == true; s.AudioCues = CuesBox.IsChecked == true; s.ShowOverlay = OverlayBox.IsChecked == true;
         if (CultureBox.SelectedItem is string c) s.SpeechCulture = c;
         if (VoiceBox.SelectedItem is string v) s.Voice = v;
-        var engineBefore = (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity);
+        var engineBefore = (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.MicrophoneName);
+        s.MicrophoneName = MicBox.SelectedIndex <= 0 ? null : MicBox.SelectedItem as string;
         s.CloudSpeechConsent = CloudSpeechBox.IsChecked == true;
         if (EngineBox.SelectedItem is ComboBoxItem { Tag: string tag }) s.SpeechEngine = Enum.Parse<SpeechEngine>(tag);
         s.MicSensitivity = SensitivitySlider.Value;
@@ -287,7 +292,7 @@ public partial class MainWindow : Window
         if (CloudVoiceBox.SelectedItem is string cv) s.CloudVoiceName = cv;
         s.Save();
         _app.Host!.RefreshVoice();
-        if (engineBefore != (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity))
+        if (engineBefore != (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.MicrophoneName))
         {
             if (MessageBox.Show(this, "The new speech settings take effect after VoxStride restarts. Restart now?", "VoxStride", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             { _app.RestartApp(); return; }
@@ -302,6 +307,50 @@ public partial class MainWindow : Window
         _ = _app.Host!.Speech?.SpeakAsync("Hi! I'm VoxStride. Just tell me what you need, take your time, and say VoxStride, execute when you're done.", CancellationToken.None);
 
     private void Restart_Click(object sender, RoutedEventArgs e) => _app.RestartApp();
+
+    private bool _micTesting;
+
+    /// <summary>Records 5 seconds from the selected microphone and shows the live level, so you can see it's working.</summary>
+    private async void TestMic_Click(object sender, RoutedEventArgs e)
+    {
+        if (_micTesting) return;
+        _micTesting = true;
+        var device = MicBox.SelectedIndex <= 0 ? -1 : MicBox.SelectedIndex - 1;
+        var name = MicBox.SelectedItem as string ?? "microphone";
+        double peak = 0;
+        var rec = new WaveInRecorder(device);
+        rec.Level += l =>
+        {
+            peak = Math.Max(peak, l);
+            Dispatcher.BeginInvoke(() => MicLevel.Value = Math.Min(100, l / 60.0));
+        };
+        try
+        {
+            if (_app.Host!.Wake is not null) await _app.Host.StopWakeAsync();
+            rec.Start();
+            MicTestText.Text = $"Listening on \"{name}\" for 5 seconds — say something…";
+            await Task.Delay(5000);
+            rec.Stop();
+            MicTestText.Text = peak < 30 ? $"✖ No sound at all from \"{name}\". Pick another microphone above, check it isn't muted, and allow desktop apps in Windows Settings › Privacy › Microphone."
+                : peak < 600 ? $"⚠ \"{name}\" works but is very quiet (peak {peak:0}). Move closer or raise its level in Windows Sound settings."
+                : $"✔ \"{name}\" is working (peak {peak:0}). Click Save to use it.";
+            DiagnosticsLog.Write($"mic-test device={name} peak={peak:0}");
+        }
+        catch (Exception ex) { MicTestText.Text = "✖ " + ex.Message; DiagnosticsLog.Write("mic-test error: " + ex.Message); }
+        finally
+        {
+            rec.Dispose();
+            MicLevel.Value = 0;
+            _micTesting = false;
+            _ = _app.Host!.StartWakeAsync();
+        }
+    }
+
+    private void OpenLogs_Click(object sender, RoutedEventArgs e)
+    {
+        Directory.CreateDirectory(DiagnosticsLog.Folder);
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{DiagnosticsLog.Folder}\"") { UseShellExecute = true });
+    }
 
     // ---------- Updates ----------
     private void RefreshUpdateUi()
@@ -389,6 +438,8 @@ public partial class MainWindow : Window
         sb.AppendLine(CultureInfo.InvariantCulture, $"Working set: {p.WorkingSet64 / 1048576.0:0.0} MB   Private: {p.PrivateMemorySize64 / 1048576.0:0.0} MB   Threads: {p.Threads.Count}");
         sb.AppendLine(CultureInfo.InvariantCulture, $"Active provider: {_app.Settings.ActiveProvider?.ToString() ?? "none"}   Model: {(_app.Settings.ActiveProvider is { } k ? _app.Settings.Models.GetValueOrDefault(k) : "-")}");
         sb.AppendLine(CultureInfo.InvariantCulture, $"Speech recognizer: {h.Recognizer.Name}   Cultures: {string.Join(", ", SpeechEnvironment.RecognizerCultures())}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Microphone: {h.MicrophoneLabel}   Devices: {string.Join(" | ", WaveInRecorder.Devices())}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Log: {DiagnosticsLog.FilePath}");
         sb.AppendLine(CultureInfo.InvariantCulture, $"Wake word: {(_app.Settings.WakeWordEnabled && _app.Settings.MicrophoneConsent ? "on" : "off")}   Mic consent: {_app.Settings.MicrophoneConsent}");
         sb.AppendLine(CultureInfo.InvariantCulture, $"App catalog: {(h.Apps.IsReady ? h.Apps.Snapshot().Count + " apps" : "building")}");
         sb.AppendLine(CultureInfo.InvariantCulture, $"Desktop: {h.FileServices.Folders.Resolve(KnownFolder.Desktop)}");

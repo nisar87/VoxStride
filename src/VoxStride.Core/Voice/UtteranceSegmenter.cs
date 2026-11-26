@@ -109,7 +109,7 @@ public sealed class UtteranceSegmenter(int sampleRate = 16000)
 
     private long StartMs(long frame) => (long)(frame * FrameLength.TotalMilliseconds);
 
-    internal static double Rms(ReadOnlySpan<byte> pcm16)
+    public static double Rms(ReadOnlySpan<byte> pcm16)
     {
         double sum = 0;
         var n = pcm16.Length / 2;

@@ -177,6 +177,13 @@
                                Text="Speech recognition and the spoken voice use the speech engines installed in Windows and run on this PC. Pauses never end your instruction — say &quot;VoxStride, execute&quot;, click Proceed or press Ctrl+Alt+V when you're done." />
                     <Border CornerRadius="10" Padding="14" Background="#10808080" Margin="0,0,0,14">
                         <StackPanel>
+                            <TextBlock Text="Microphone" FontWeight="SemiBold" FontSize="15" />
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,4">
+                                <ComboBox x:Name="MicBox" Width="300" AutomationProperties.Name="Microphone" />
+                                <Button Content="Test microphone" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="TestMic_Click" />
+                            </StackPanel>
+                            <ProgressBar x:Name="MicLevel" Height="10" Maximum="100" Width="300" HorizontalAlignment="Left" Margin="0,4,0,2" AutomationProperties.Name="Microphone level" />
+                            <TextBlock x:Name="MicTestText" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,12" />
                             <TextBlock Text="Understanding your voice" FontWeight="SemiBold" FontSize="15" />
                             <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,2,0,8"
                                        Text="Cloud speech understands accents and mixed Urdu/English far better than the built-in Windows engine. Your voice is sent only while you're giving an instruction — never in standby." />
@@ -269,7 +276,10 @@
                         </StackPanel>
                     </Border>
                     <TextBox x:Name="DiagnosticsText" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Cascadia Mono, Consolas" FontSize="12" MinHeight="300" />
-                    <Button Content="Refresh" Style="{StaticResource PlainButton}" HorizontalAlignment="Left" Margin="0,8,0,0" Click="RefreshDiagnostics_Click" />
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <Button Content="Refresh" Style="{StaticResource PlainButton}" Click="RefreshDiagnostics_Click" />
+                        <Button Content="Open log folder" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="OpenLogs_Click" />
+                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
         </Grid>

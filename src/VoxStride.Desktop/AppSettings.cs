@@ -31,6 +31,8 @@ public sealed class AppSettings
     public bool NaturalVoice { get; set; } = true;
     public string CloudVoiceName { get; set; } = "marin";
     public double MicSensitivity { get; set; } = 3.0;
+    /// <summary>Recording device name; null = Windows default microphone.</summary>
+    public string? MicrophoneName { get; set; }
     public bool AutoCheckUpdates { get; set; } = true;
     public bool AutoInstallUpdates { get; set; } = true;
     public DateTimeOffset LastUpdateCheck { get; set; }

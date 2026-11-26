@@ -25,10 +25,43 @@ public sealed class WaveInRecorder : IDisposable
     [DllImport("winmm.dll")] private static extern int waveInReset(nint h);
     [DllImport("winmm.dll")] private static extern int waveInClose(nint h);
     [DllImport("winmm.dll")] private static extern int waveInGetNumDevs();
+    [DllImport("winmm.dll", CharSet = CharSet.Unicode, EntryPoint = "waveInGetDevCapsW")] private static extern int waveInGetDevCaps(nint id, ref WAVEINCAPS caps, int size);
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct WAVEINCAPS { public ushort wMid, wPid; public uint vDriverVersion; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szPname; public uint dwFormats; public ushort wChannels, wReserved1; }
+
+    public WaveInRecorder(int deviceId = WAVE_MAPPER) { DeviceId = deviceId; }
+
+    public int DeviceId { get; }
     public int SampleRate { get; } = 16000;
     public event Action<byte[]>? DataAvailable;
     public event Action<string>? Error;
+    /// <summary>RMS level of the latest buffer (0–32767), for the microphone meter and diagnostics.</summary>
+    public event Action<double>? Level;
+    public double PeakSinceStart { get; private set; }
+
+    /// <summary>Recording devices in waveIn order (index = device id). Names are truncated by Windows to 31 characters.</summary>
+    public static IReadOnlyList<string> Devices()
+    {
+        var list = new List<string>();
+        var n = waveInGetNumDevs();
+        for (var i = 0; i < n; i++)
+        {
+            var caps = new WAVEINCAPS();
+            list.Add(waveInGetDevCaps(i, ref caps, Marshal.SizeOf<WAVEINCAPS>()) == 0 ? caps.szPname : $"Microphone {i + 1}");
+        }
+        return list;
+    }
+
+    /// <summary>Finds the device id for a saved microphone name (prefix match, since Windows truncates names); -1 = system default.</summary>
+    public static int ResolveDevice(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return WAVE_MAPPER;
+        var devices = Devices();
+        for (var i = 0; i < devices.Count; i++)
+            if (devices[i].Equals(name, StringComparison.OrdinalIgnoreCase) || name.StartsWith(devices[i], StringComparison.OrdinalIgnoreCase)) return i;
+        return WAVE_MAPPER;
+    }
 
     private nint _handle;
     private readonly List<nint> _headers = [];
@@ -44,7 +77,8 @@ public sealed class WaveInRecorder : IDisposable
         if (!HasMicrophone()) throw new InvalidOperationException("No microphone was found.");
         var fmt = new WAVEFORMATEX { wFormatTag = 1, nChannels = 1, nSamplesPerSec = (uint)SampleRate, wBitsPerSample = 16, nBlockAlign = 2, nAvgBytesPerSec = (uint)SampleRate * 2 };
         _signal = new AutoResetEvent(false);
-        var rc = waveInOpen(out _handle, WAVE_MAPPER, ref fmt, _signal.SafeWaitHandle.DangerousGetHandle(), 0, CALLBACK_EVENT);
+        PeakSinceStart = 0;
+        var rc = waveInOpen(out _handle, DeviceId, ref fmt, _signal.SafeWaitHandle.DangerousGetHandle(), 0, CALLBACK_EVENT);
         if (rc != 0) throw new InvalidOperationException($"Could not open the microphone (code {rc}). Check Windows microphone privacy settings.");
         var size = Marshal.SizeOf<WAVEHDR>();
         var bytes = SampleRate * 2 * BufferMs / 1000;
@@ -77,7 +111,9 @@ public sealed class WaveInRecorder : IDisposable
                 {
                     var data = new byte[h.dwBytesRecorded];
                     Marshal.Copy(h.lpData, data, 0, data.Length);
-                    try { DataAvailable?.Invoke(data); } catch (Exception ex) { Error?.Invoke(ex.Message); }
+                    var rms = UtteranceSegmenter.Rms(data);
+                    if (rms > PeakSinceStart) PeakSinceStart = rms;
+                    try { Level?.Invoke(rms); DataAvailable?.Invoke(data); } catch (Exception ex) { Error?.Invoke(ex.Message); }
                 }
                 h.dwFlags &= ~(uint)WHDR_DONE;
                 h.dwBytesRecorded = 0;
@@ -119,7 +155,7 @@ public sealed class WaveInRecorder : IDisposable
 public sealed class CloudSpeechRecognizer : ISpeechRecognizer
 {
     private readonly ITranscriber _transcriber;
-    private readonly WaveInRecorder _mic = new();
+    private readonly WaveInRecorder _mic;
     private readonly Lock _gate = new();
     private Channel<(AudioSegment seg, string id, Guid session)>? _queue;
     private Task? _worker;
@@ -129,10 +165,12 @@ public sealed class CloudSpeechRecognizer : ISpeechRecognizer
     private int _counter;
     private string? _openId;
     private string _context = "";
+    private Timer? _silenceTimer;
 
-    public CloudSpeechRecognizer(ITranscriber transcriber, double sensitivity = 3.0)
+    public CloudSpeechRecognizer(ITranscriber transcriber, double sensitivity = 3.0, int deviceId = -1)
     {
         _transcriber = transcriber;
+        _mic = new WaveInRecorder(deviceId);
         Sensitivity = sensitivity;
         _mic.DataAvailable += d => { lock (_gate) _segmenter?.Push(d); };
         _mic.Error += m => Error?.Invoke(m);
@@ -142,6 +180,7 @@ public sealed class CloudSpeechRecognizer : ISpeechRecognizer
     public string Name => "Cloud speech (" + _transcriber.Name + ")";
     public event Action<TranscriptEvent>? Transcript;
     public event Action<string>? Error;
+    public event Action<double>? Level { add => _mic.Level += value; remove => _mic.Level -= value; }
 
     public Task StartAsync(Guid sessionId, CancellationToken ct)
     {
@@ -177,6 +216,12 @@ public sealed class CloudSpeechRecognizer : ISpeechRecognizer
             lock (_gate) { _segmenter = null; _queue?.Writer.TryComplete(); }
             throw;
         }
+        _silenceTimer?.Dispose();
+        _silenceTimer = new Timer(_ =>
+        {
+            if (_segmenter is not null && _mic.PeakSinceStart < 30)
+                Error?.Invoke("I can't hear anything from your microphone. Choose the right microphone in Voice settings, check it isn't muted, and make sure Windows Settings › Privacy › Microphone allows desktop apps");
+        }, null, TimeSpan.FromSeconds(6), Timeout.InfiniteTimeSpan);
         return Task.CompletedTask;
     }
 
@@ -201,6 +246,7 @@ public sealed class CloudSpeechRecognizer : ISpeechRecognizer
     {
         Channel<(AudioSegment, string, Guid)>? q;
         Task? worker;
+        _silenceTimer?.Dispose();
         _mic.Stop();
         lock (_gate)
         {

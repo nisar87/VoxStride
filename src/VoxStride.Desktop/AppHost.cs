@@ -94,6 +94,7 @@ public sealed class AppHost : IAsyncDisposable
     public ISpeechRecognizer Recognizer { get; }
     public NaturalSpeechSynthesizer? Speech { get; }
     public string SpeechEngineLabel { get; private set; } = "off";
+    public string MicrophoneLabel { get; private set; } = "none";
     public WindowsWakeWordDetector? Wake { get; private set; }
     public PlaywrightBrowserController Browser { get; }
     public FileToolServices FileServices { get; }
@@ -165,13 +166,15 @@ public sealed class AppHost : IAsyncDisposable
                 _ => null,
             };
         }
+        var device = WaveInRecorder.ResolveDevice(Settings.MicrophoneName);
+        MicrophoneLabel = device < 0 ? "Windows default microphone" : WaveInRecorder.Devices()[device];
         if (cloud is not null && WaveInRecorder.HasMicrophone())
         {
             SpeechEngineLabel = cloud.Name;
-            return new CloudSpeechRecognizer(cloud, Settings.MicSensitivity);
+            return new CloudSpeechRecognizer(cloud, Settings.MicSensitivity, device);
         }
         SpeechEngineLabel = "Windows (offline)";
-        return new WindowsSpeechRecognizer(Settings.SpeechCulture, ["VoxStride execute", "VoxStride proceed", "assistant proceed", "execute now", "cancel", "never mind", "scratch that", "undo last sentence", "stop listening"]);
+        return new WindowsSpeechRecognizer(Settings.SpeechCulture, ["VoxStride execute", "VoxStride proceed", "assistant proceed", "execute now", "cancel", "never mind", "scratch that", "undo last sentence", "stop listening"], device);
     }
 
     private ICloudVoice? CreateCloudVoice()
@@ -185,6 +188,7 @@ public sealed class AppHost : IAsyncDisposable
 
     public async Task StartAsync(CancellationToken ct)
     {
+        DiagnosticsLog.Write($"start v{UpdateService.CurrentVersion.ToString(3)} os={Environment.OSVersion.Version} speech={SpeechEngineLabel} mic={MicrophoneLabel} micDevices=[{string.Join(" | ", WaveInRecorder.Devices())}] provider={Settings.ActiveProvider?.ToString() ?? "none"} cloudSpeechConsent={Settings.CloudSpeechConsent}");
         _ = Apps.BuildAsync(ct); // catalog builds in the background; direct disk queries never wait for it
         await Rules.RefreshAsync(ct);
         var unresolved = await Store.GetUnresolvedMovesAsync(ct);
@@ -204,12 +208,13 @@ public sealed class AppHost : IAsyncDisposable
         catch (Exception ex)
         {
             Events.Publish(Guid.Empty, AgentState.Standby, "wake-unavailable", "Wake word is unavailable (" + ex.Message + "). Use Ctrl+Alt+V instead.", canCancel: false);
+            DiagnosticsLog.Write("wake-unavailable: " + ex.Message);
         }
     }
 
     private WindowsWakeWordDetector CreateWake()
     {
-        var w = new WindowsWakeWordDetector(Settings.SpeechCulture);
+        var w = new WindowsWakeWordDetector(Settings.SpeechCulture, WaveInRecorder.ResolveDevice(Settings.MicrophoneName));
         string? trailing = null;
         w.TrailingText += t => trailing = t;
         w.WakeDetected += detectedAt =>

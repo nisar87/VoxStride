@@ -40,7 +40,9 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer
 {
     private readonly string _culture;
     private readonly IReadOnlyList<string> _controlPhrases;
+    private readonly int _deviceId;
     private SpeechRecognitionEngine? _engine;
+    private MicInput? _mic;
     private Guid _session;
     private int _segment;
     private int _revision;
@@ -50,15 +52,17 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer
     private bool _running;
     private readonly Lock _gate = new();
 
-    public WindowsSpeechRecognizer(string culture, IReadOnlyList<string> controlPhrases)
+    public WindowsSpeechRecognizer(string culture, IReadOnlyList<string> controlPhrases, int deviceId = -1)
     {
         _culture = culture;
         _controlPhrases = controlPhrases;
+        _deviceId = deviceId;
     }
 
     public string Name => "Windows speech recognition (local)";
     public event Action<TranscriptEvent>? Transcript;
     public event Action<string>? Error;
+    public event Action<double>? Level;
 
     public Task StartAsync(Guid sessionId, CancellationToken ct)
     {
@@ -86,10 +90,8 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer
                     var alt = e.Result.Alternates.FirstOrDefault();
                     Emit(alt?.Text ?? "", isFinal: true, alt?.Confidence ?? 0, e.Result.Audio);
                 };
-                _engine.AudioSignalProblemOccurred += (_, e) =>
-                {
-                    if (e.AudioSignalProblem is AudioSignalProblem.NoSignal) Error?.Invoke("No microphone signal");
-                };
+                // Note: AudioSignalProblem.NoSignal also fires during ordinary silence, so it is NOT treated as a microphone
+                // failure. Real "no audio" is detected from the captured level instead (see MicInput.SilenceCheck).
                 _engine.RecognizeCompleted += (_, e) =>
                 {
                     if (e.Error is not null) Error?.Invoke(e.Error.Message);
@@ -98,8 +100,10 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer
                 };
             }
             if (_running) return Task.CompletedTask; // already capturing: only the session id changes
-            try { _engine.SetInputToDefaultAudioDevice(); }
-            catch (Exception ex) when (ex is InvalidOperationException or COMException) { throw new InvalidOperationException("No microphone is available (" + ex.Message + ")."); }
+            _mic = new MicInput(_deviceId);
+            _mic.Level += l => Level?.Invoke(l);
+            _mic.Problem += m => Error?.Invoke(m);
+            _mic.Attach(_engine);
             _stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _engine.RecognizeAsync(RecognizeMode.Multiple);
             _running = true;
@@ -127,8 +131,9 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer
         {
             if (_engine is null || _stopped is null || !_running) return;
             wait = _stopped.Task;
+            _mic?.Stop(); // end of audio: the engine finalizes the last phrase, then completes
             if (flushTimeout <= TimeSpan.Zero) _engine.RecognizeAsyncCancel();
-            else _engine.RecognizeAsyncStop(); // completes the current phrase, then stops
+            else _engine.RecognizeAsyncStop();
         }
         await Task.WhenAny(wait, Task.Delay(flushTimeout <= TimeSpan.Zero ? TimeSpan.FromMilliseconds(300) : flushTimeout, ct)).ConfigureAwait(false);
         if (!wait.IsCompleted)
@@ -140,12 +145,13 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer
         {
             _running = !wait.IsCompleted && _running;
             try { _engine?.SetInputToNull(); } catch (Exception) { } // release the microphone
+            _mic = null;
         }
     }
 
     public ValueTask DisposeAsync()
     {
-        lock (_gate) { _session = Guid.Empty; _engine?.Dispose(); _engine = null; }
+        lock (_gate) { _session = Guid.Empty; _mic?.Stop(); _engine?.Dispose(); _engine = null; }
         return ValueTask.CompletedTask;
     }
 }
@@ -169,7 +175,9 @@ public sealed class WindowsWakeWordDetector : IWakeWordDetector
 
     public static readonly string[] Variants = ["hey voxstride", "hey vox stride", "okay voxstride", "ok vox stride", "hi voxstride"];
 
-    public WindowsWakeWordDetector(string culture) { _culture = culture; }
+    private readonly int _deviceId;
+    private MicInput? _mic;
+    public WindowsWakeWordDetector(string culture, int deviceId = -1) { _culture = culture; _deviceId = deviceId; }
 
     public Task StartAsync(CancellationToken ct)
     {
@@ -195,7 +203,8 @@ public sealed class WindowsWakeWordDetector : IWakeWordDetector
                 };
             }
             if (_running) return Task.CompletedTask;
-            _engine.SetInputToDefaultAudioDevice();
+            _mic = new MicInput(_deviceId, silenceCheck: false);
+            _mic.Attach(_engine);
             _engine.RecognizeAsync(RecognizeMode.Multiple);
             _running = true;
         }
@@ -207,6 +216,8 @@ public sealed class WindowsWakeWordDetector : IWakeWordDetector
         lock (_gate)
         {
             if (!_running) return Task.CompletedTask;
+            _mic?.Stop();
+            _mic = null;
             try { _engine?.RecognizeAsyncCancel(); _engine?.SetInputToNull(); } catch (Exception) { }
             _running = false;
         }
@@ -215,9 +226,95 @@ public sealed class WindowsWakeWordDetector : IWakeWordDetector
 
     public ValueTask DisposeAsync()
     {
-        lock (_gate) { _engine?.Dispose(); _engine = null; }
+        lock (_gate) { _mic?.Stop(); _engine?.Dispose(); _engine = null; }
         return ValueTask.CompletedTask;
     }
+}
+
+/// <summary>
+/// Captures the user's chosen microphone with <see cref="WaveInRecorder"/> and feeds it to a Windows speech engine
+/// through a blocking stream. This lets the user pick the device, shows a live level, and detects a genuinely silent
+/// (muted, disconnected or privacy-blocked) microphone instead of relying on the engine's noisy NoSignal event.
+/// </summary>
+internal sealed class MicInput
+{
+    private readonly WaveInRecorder _rec;
+    private readonly BlockingAudioStream _stream = new();
+    private readonly bool _silenceCheck;
+    private Timer? _timer;
+    public event Action<double>? Level;
+    public event Action<string>? Problem;
+
+    public MicInput(int deviceId, bool silenceCheck = true)
+    {
+        _rec = new WaveInRecorder(deviceId);
+        _silenceCheck = silenceCheck;
+        _rec.DataAvailable += d => _stream.Write(d);
+        _rec.Level += l => Level?.Invoke(l);
+        _rec.Error += m => Problem?.Invoke(m);
+    }
+
+    public void Attach(SpeechRecognitionEngine engine)
+    {
+        _rec.Start(); // throws a clear message if the device can't be opened
+        engine.SetInputToAudioStream(_stream, new System.Speech.AudioFormat.SpeechAudioFormatInfo(_rec.SampleRate, System.Speech.AudioFormat.AudioBitsPerSample.Sixteen, System.Speech.AudioFormat.AudioChannel.Mono));
+        if (_silenceCheck)
+            _timer = new Timer(_ =>
+            {
+                if (_rec.PeakSinceStart < 30)
+                    Problem?.Invoke("I can't hear anything from your microphone. Choose the right microphone in Voice settings, check it isn't muted, and make sure Windows Settings › Privacy › Microphone allows desktop apps");
+            }, null, TimeSpan.FromSeconds(6), Timeout.InfiniteTimeSpan);
+    }
+
+    public void Stop()
+    {
+        _timer?.Dispose();
+        _rec.Stop();
+        _stream.Complete();
+    }
+}
+
+/// <summary>Producer/consumer stream: Read blocks until audio arrives; returns 0 only after Complete().</summary>
+internal sealed class BlockingAudioStream : Stream
+{
+    private readonly Queue<byte[]> _chunks = new();
+    private byte[]? _current;
+    private int _offset;
+    private bool _completed;
+    private readonly object _gate = new();
+
+    public void Write(byte[] data) { lock (_gate) { if (_completed) return; _chunks.Enqueue(data); Monitor.PulseAll(_gate); } }
+    public void Complete() { lock (_gate) { _completed = true; Monitor.PulseAll(_gate); } }
+
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        lock (_gate)
+        {
+            while (true)
+            {
+                if (_current is not null && _offset < _current.Length)
+                {
+                    var n = Math.Min(count, _current.Length - _offset);
+                    Buffer.BlockCopy(_current, _offset, buffer, offset, n);
+                    _offset += n;
+                    return n;
+                }
+                if (_chunks.Count > 0) { _current = _chunks.Dequeue(); _offset = 0; continue; }
+                if (_completed) return 0;
+                Monitor.Wait(_gate);
+            }
+        }
+    }
+
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => -1;
+    public override long Position { get => 0; set { } }
+    public override void Flush() { }
+    public override long Seek(long offset, SeekOrigin origin) => 0;
+    public override void SetLength(long value) { }
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 }
 
 /// <summary>Local TTS with installed Windows voices plus cached in-memory earcons (no network).</summary>
