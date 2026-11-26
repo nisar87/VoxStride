@@ -8,7 +8,6 @@
     <RootNamespace>VoxStride.Desktop</RootNamespace>
     <ApplicationIcon>Assets\voxstride.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <!-- WPF0001: Fluent ThemeMode is an evaluation API in .NET 10. -->
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
     <!-- Avoid WinForms/WPF type-name ambiguity: only System.Windows.Forms.NotifyIcon is used, fully qualified. -->
