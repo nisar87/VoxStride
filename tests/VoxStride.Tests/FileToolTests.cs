@@ -92,7 +92,7 @@ public sealed class FileToolTests : IDisposable
             var (p, _) = await Organize();
             Assert.Equal(0, p.ObservedState!["moveCount"]!.GetValue<int>());
             Assert.True(File.Exists(target));
-            Assert.Empty(Directory.GetFiles(outside.Path).Where(f => f.EndsWith("pic.png", StringComparison.Ordinal)));
+            Assert.DoesNotContain(Directory.GetFiles(outside.Path), f => f.EndsWith("pic.png", StringComparison.Ordinal));
         }
         catch (UnauthorizedAccessException) { /* symlink creation not permitted on this runner */ }
         catch (IOException) { }
