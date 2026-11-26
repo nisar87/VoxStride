@@ -1,0 +1,38 @@
+## Build outputs
+bin/
+obj/
+artifacts/
+publish/
+out/
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+TestResults/
+*.trx
+coverage*/
+
+## Secrets and local settings — never commit
+*.env
+.env*
+secrets*.json
+appsettings.Local.json
+*.pfx
+*.snk
+*apikey*
+*api-key*
+
+## Runtime data
+*.db
+*.db-shm
+*.db-wal
+logs/
+*.log
+*.wav
+*.mp3
+*.pcm
+screenshots/
+playwright-profile/
+test-output/
+evidence-local/

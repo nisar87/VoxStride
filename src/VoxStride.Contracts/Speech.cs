@@ -1,0 +1,30 @@
+namespace VoxStride.Contracts;
+
+/// <summary>Streaming speech recognizer. Emits revisioned transcript events; never decides when a command ends.</summary>
+public interface ISpeechRecognizer : IAsyncDisposable
+{
+    string Name { get; }
+    event Action<TranscriptEvent>? Transcript;
+    event Action<string>? Error;
+    Task StartAsync(Guid sessionId, CancellationToken ct);
+    /// <summary>Stops capture and flushes pending recognition; returns after the last final segment or the timeout.</summary>
+    Task StopAsync(TimeSpan flushTimeout, CancellationToken ct);
+}
+
+public interface ISpeechSynthesizer
+{
+    bool IsSpeaking { get; }
+    Task SpeakAsync(string text, CancellationToken ct);
+    void PlayCue(CueKind cue);
+    void StopSpeaking();
+}
+
+public enum CueKind { Wake, Commit, Done, Error, Cancelled }
+
+public interface IWakeWordDetector : IAsyncDisposable
+{
+    string Phrase { get; }
+    event Action<DateTimeOffset>? WakeDetected;
+    Task StartAsync(CancellationToken ct);
+    Task StopAsync();
+}

@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  CI: "true"
+
+jobs:
+  core-linux:
+    name: Core tests (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Restore
+        run: dotnet restore tests/VoxStride.Tests/VoxStride.Tests.csproj
+      - name: Build
+        run: dotnet build tests/VoxStride.Tests/VoxStride.Tests.csproj -c Release --no-restore
+      - name: Test
+        run: dotnet test tests/VoxStride.Tests/VoxStride.Tests.csproj -c Release --no-build --logger "trx;LogFileName=core-linux.trx" --logger "console;verbosity=normal" --results-directory TestResults
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-linux
+          path: TestResults/
+
+  windows:
+    name: Windows build, tests, package
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Restore
+        run: dotnet restore VoxStride.sln
+      - name: Build
+        run: dotnet build VoxStride.sln -c Release --no-restore
+      - name: Test
+        run: dotnet test VoxStride.sln -c Release --no-build --logger "trx" --logger "console;verbosity=normal" --results-directory TestResults
+      - name: Vulnerable package audit
+        shell: pwsh
+        run: |
+          dotnet list VoxStride.sln package --vulnerable --include-transitive 2>&1 | Tee-Object -FilePath TestResults/vulnerable-packages.txt
+          if (Select-String -Path TestResults/vulnerable-packages.txt -Pattern "has the following vulnerable packages") { Write-Error "Vulnerable packages found"; exit 1 }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-windows
+          path: TestResults/
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for committed secrets
+        run: |
+          set -e
+          if git grep -nE '(sk-ant-[A-Za-z0-9_-]{20,}|sk-proj-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{40,}|AIza[0-9A-Za-z_-]{35}|-----BEGIN (RSA |EC )?PRIVATE KEY-----)' -- ':!*.md'; then
+            echo "Possible secret committed"; exit 1
+          fi
+          echo "No secrets found"

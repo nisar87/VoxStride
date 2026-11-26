@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <Company>VoxStride</Company>
+    <Product>VoxStride</Product>
+    <Version>0.1.0</Version>
+    <!-- CA1416: platform checks are enforced by project TFM split (Windows code lives in *-windows projects). -->
+    <NoWarn>$(NoWarn);CA1416;NETSDK1206</NoWarn>
+  </PropertyGroup>
+</Project>
