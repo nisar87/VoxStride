@@ -1,0 +1,231 @@
+<Window x:Class="VoxStride.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="VoxStride" Width="980" Height="700" MinWidth="760" MinHeight="520"
+        WindowStartupLocation="CenterScreen" FontFamily="{StaticResource UiFont}" Icon="Assets/voxstride.png">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Navigation -->
+        <Border Background="#0C808080">
+            <DockPanel Margin="16,20,16,16">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="4,0,0,24">
+                    <Image Source="Assets/voxstride.png" Width="32" Height="32" />
+                    <StackPanel Margin="10,0,0,0">
+                        <TextBlock Text="VoxStride" FontFamily="{StaticResource DisplayFont}" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="Speak. Command. Accomplish." Style="{StaticResource Caption}" FontSize="11" />
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Bottom">
+                    <TextBlock Text="{Binding ProviderLabel}" Style="{StaticResource Caption}" TextWrapping="Wrap" />
+                    <TextBlock Text="Ctrl+Alt+V  talk / proceed" Style="{StaticResource Caption}" Margin="0,8,0,0" />
+                    <TextBlock Text="Ctrl+Alt+X  stop" Style="{StaticResource Caption}" />
+                    <TextBlock Text="Ctrl+Alt+M  mute" Style="{StaticResource Caption}" />
+                </StackPanel>
+                <ListBox x:Name="Nav" BorderThickness="0" Background="Transparent" SelectionChanged="Nav_SelectionChanged" AutomationProperties.Name="Sections">
+                    <ListBoxItem Content="Home" Padding="12,8" />
+                    <ListBoxItem Content="History" Padding="12,8" />
+                    <ListBoxItem Content="Reasoning providers" Padding="12,8" />
+                    <ListBoxItem Content="Voice" Padding="12,8" />
+                    <ListBoxItem Content="Privacy &amp; permissions" Padding="12,8" />
+                    <ListBoxItem Content="About &amp; diagnostics" Padding="12,8" />
+                </ListBox>
+            </DockPanel>
+        </Border>
+
+        <!-- Pages -->
+        <Grid Grid.Column="1" Margin="28,24,28,20">
+            <!-- Home -->
+            <DockPanel x:Name="HomePage">
+                <StackPanel DockPanel.Dock="Top">
+                    <Border x:Name="WelcomePanel" CornerRadius="10" Padding="18" Margin="0,0,0,18" Background="{StaticResource BrandGradient}" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="Welcome to VoxStride" Foreground="White" FontSize="20" FontWeight="SemiBold" FontFamily="{StaticResource DisplayFont}" />
+                            <TextBlock Foreground="White" TextWrapping="Wrap" Margin="0,6,0,10" Opacity="0.95"
+                                       Text="VoxStride listens only after the wake phrase or hotkey. Standby audio stays on this PC and is never stored or uploaded. Your instruction text (not audio) is sent to the reasoning provider you choose only when a task needs it. Files, screenshots and page contents are never uploaded unless a task you approved requires it." />
+                            <CheckBox x:Name="ConsentBox" Foreground="White" Content="I understand. Enable the microphone for wake word and dictation." />
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Content="Continue" Style="{StaticResource PlainButton}" Click="Welcome_Continue" />
+                                <Button Content="Typed commands only" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="Welcome_TypedOnly" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="What should I do?" Style="{StaticResource SectionTitle}" />
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="CommandBox" FontSize="15" Padding="10,7" KeyDown="CommandBox_KeyDown"
+                                 AutomationProperties.Name="Type an instruction" ToolTip="Type an instruction and press Enter" />
+                        <Button Grid.Column="1" Content="Run" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0" Click="Run_Click" />
+                        <Button Grid.Column="2" x:Name="TalkButton" Content="🎙 Talk" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="Talk_Click" />
+                    </Grid>
+                    <WrapPanel Margin="0,0,0,14">
+                        <Button Content="How much space is left on C?" Style="{StaticResource PlainButton}" Margin="0,0,8,8" Click="Example_Click" />
+                        <Button Content="Organize my desktop, leave shortcuts" Style="{StaticResource PlainButton}" Margin="0,0,8,8" Click="Example_Click" />
+                        <Button Content="Clean up my temp files" Style="{StaticResource PlainButton}" Margin="0,0,8,8" Click="Example_Click" />
+                        <Button Content="Open Notepad++" Style="{StaticResource PlainButton}" Margin="0,0,8,8" Click="Example_Click" />
+                        <Button Content="Undo that" Style="{StaticResource PlainButton}" Margin="0,0,8,8" Click="Example_Click" />
+                    </WrapPanel>
+
+                    <Border CornerRadius="10" Padding="14" Background="#10808080" Margin="0,0,0,14">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="10" Height="10" Fill="{Binding StateBrush}" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding StateLabel}" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding Elapsed}" Style="{StaticResource Caption}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock TextWrapping="Wrap" Margin="0,8,0,0" FontSize="14">
+                                <Run Text="{Binding FinalTranscript, Mode=OneWay}" />
+                                <Run Text=" " />
+                                <Run Text="{Binding InterimTranscript, Mode=OneWay}" FontStyle="Italic" Foreground="Gray" />
+                            </TextBlock>
+                            <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite" />
+                            <ProgressBar Height="6" Margin="0,8,0,0" Maximum="100" Value="{Binding Progress}" x:Name="HomeProgress" />
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                                <Button Content="Stop" Style="{StaticResource PlainButton}" Click="Stop_Click" />
+                                <Button Content="Proceed" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0" Visibility="{Binding ProceedVisible}" Click="Proceed_Click" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                    <TextBlock Text="Activity" FontWeight="SemiBold" Margin="0,0,0,6" />
+                </StackPanel>
+                <ListView ItemsSource="{Binding Activity}" BorderThickness="0" AutomationProperties.Name="Activity">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding Time}" Style="{StaticResource Caption}" Width="64" />
+                                <TextBlock Text="{Binding Icon}" Width="18" />
+                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" MaxWidth="620" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </DockPanel>
+
+            <!-- History -->
+            <DockPanel x:Name="HistoryPage" Visibility="Collapsed">
+                <StackPanel DockPanel.Dock="Top">
+                    <TextBlock Text="History" Style="{StaticResource SectionTitle}" />
+                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,10"
+                               Text="Verified results of each task. Instruction text is kept only if you enable it under Privacy. Undo restores the most recent organization when files are unchanged." />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <Button Content="Refresh" Style="{StaticResource PlainButton}" Click="RefreshHistory_Click" />
+                        <Button Content="Undo last organization" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="UndoLast_Click" />
+                        <Button Content="Export redacted diagnostics" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="Export_Click" />
+                    </StackPanel>
+                </StackPanel>
+                <ListView x:Name="HistoryList" BorderThickness="0">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="0,6">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Badge}" FontWeight="SemiBold" Width="22" />
+                                    <TextBlock Text="{Binding When}" Style="{StaticResource Caption}" Width="140" />
+                                    <TextBlock Text="{Binding Meta}" Style="{StaticResource Caption}" />
+                                </StackPanel>
+                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" Margin="22,2,0,0" />
+                                <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" Margin="22,2,0,0" />
+                                <TextBlock Text="{Binding Steps}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="22,2,0,0" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </DockPanel>
+
+            <!-- Providers -->
+            <ScrollViewer x:Name="ProvidersPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                <StackPanel MaxWidth="640" HorizontalAlignment="Left">
+                    <TextBlock Text="Reasoning providers" Style="{StaticResource SectionTitle}" />
+                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,14"
+                               Text="Bring your own API key. Keys are stored in Windows Credential Manager on this PC and never written to logs. API usage is billed by the provider separately from consumer subscriptions. Simple commands (drive space, opening apps, organizing, cleanup) run locally without any provider." />
+                    <TextBlock Text="Active provider" FontWeight="SemiBold" />
+                    <ComboBox x:Name="ActiveProviderBox" Margin="0,4,0,16" SelectionChanged="ActiveProvider_Changed" Width="260" HorizontalAlignment="Left">
+                        <ComboBoxItem Content="None (local commands only)" Tag="" />
+                        <ComboBoxItem Content="Claude (Anthropic)" Tag="Claude" />
+                        <ComboBoxItem Content="Gemini (Google)" Tag="Gemini" />
+                        <ComboBoxItem Content="OpenAI" Tag="OpenAI" />
+                    </ComboBox>
+                    <ItemsControl x:Name="ProviderCards" />
+                    <TextBlock Text="Limits" FontWeight="SemiBold" Margin="0,16,0,4" />
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="260" /><ColumnDefinition Width="160" /></Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions><RowDefinition /><RowDefinition /><RowDefinition /></Grid.RowDefinitions>
+                        <TextBlock Text="Daily token budget per provider" VerticalAlignment="Center" />
+                        <TextBox x:Name="DailyBudgetBox" Grid.Column="1" Margin="0,2" />
+                        <TextBlock Grid.Row="1" Text="Max tokens per task" VerticalAlignment="Center" />
+                        <TextBox x:Name="RunBudgetBox" Grid.Row="1" Grid.Column="1" Margin="0,2" />
+                        <TextBlock Grid.Row="2" Text="Max tool steps per task" VerticalAlignment="Center" />
+                        <TextBox x:Name="MaxStepsBox" Grid.Row="2" Grid.Column="1" Margin="0,2" />
+                    </Grid>
+                    <Button Content="Save limits" Style="{StaticResource PlainButton}" HorizontalAlignment="Left" Margin="0,10,0,0" Click="SaveLimits_Click" />
+                    <TextBlock x:Name="UsageText" Style="{StaticResource Caption}" Margin="0,10,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Voice -->
+            <ScrollViewer x:Name="VoicePage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                <StackPanel MaxWidth="640" HorizontalAlignment="Left">
+                    <TextBlock Text="Voice" Style="{StaticResource SectionTitle}" />
+                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,14"
+                               Text="Speech recognition and the spoken voice use the speech engines installed in Windows and run on this PC. Pauses never end your instruction — say &quot;VoxStride, execute&quot;, click Proceed or press Ctrl+Alt+V when you're done." />
+                    <CheckBox x:Name="WakeBox" Content="Listen for &quot;Hey VoxStride&quot; (local, on this PC)" Margin="0,4" />
+                    <CheckBox x:Name="PlainProceedBox" Content="Also accept a standalone &quot;Proceed&quot; to finish (less strict)" Margin="0,4" />
+                    <CheckBox x:Name="SpeakBox" Content="Speak results aloud" Margin="0,4" />
+                    <CheckBox x:Name="CuesBox" Content="Play short sound cues" Margin="0,4" />
+                    <CheckBox x:Name="OverlayBox" Content="Show the floating assistant" Margin="0,4" />
+                    <TextBlock Text="Recognition language" FontWeight="SemiBold" Margin="0,14,0,4" />
+                    <ComboBox x:Name="CultureBox" Width="260" HorizontalAlignment="Left" />
+                    <TextBlock Text="Voice" FontWeight="SemiBold" Margin="0,14,0,4" />
+                    <ComboBox x:Name="VoiceBox" Width="360" HorizontalAlignment="Left" />
+                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                        <Button Content="Save" Style="{StaticResource PrimaryButton}" Click="SaveVoice_Click" />
+                        <Button Content="Test voice" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="TestVoice_Click" />
+                    </StackPanel>
+                    <TextBlock x:Name="VoiceInfo" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,12,0,0" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Privacy -->
+            <ScrollViewer x:Name="PrivacyPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                <StackPanel MaxWidth="640" HorizontalAlignment="Left">
+                    <TextBlock Text="Privacy &amp; permissions" Style="{StaticResource SectionTitle}" />
+                    <CheckBox x:Name="MicConsentBox" Content="Allow microphone (wake word and dictation)" Margin="0,4" />
+                    <CheckBox x:Name="RetainBox" Content="Keep my instruction text in History (off: only results are kept)" Margin="0,4" />
+                    <CheckBox x:Name="StartupBox" Content="Start VoxStride when I sign in" Margin="0,4" />
+                    <Button Content="Save" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Margin="0,10,0,18" Click="SavePrivacy_Click" />
+                    <TextBlock Text="Saved permissions" FontWeight="SemiBold" />
+                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,2,0,6"
+                               Text="Rules you created by ticking &quot;Always allow&quot;. They only cover reversible organizing of a specific folder. Deleting files and other changes always ask." />
+                    <ListBox x:Name="RulesList" MinHeight="60" MaxHeight="180" />
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,18">
+                        <Button Content="Revoke selected" Style="{StaticResource PlainButton}" Click="RevokeRule_Click" />
+                        <Button Content="Revoke all" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="RevokeAll_Click" />
+                    </StackPanel>
+                    <TextBlock Text="Data" FontWeight="SemiBold" />
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                        <Button Content="Clear history" Style="{StaticResource PlainButton}" Click="ClearHistory_Click" />
+                        <Button Content="Clear history and undo data" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="ClearAll_Click" />
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,14,0,0"
+                               Text="Provider data policies: Anthropic — anthropic.com/legal/privacy · Google — ai.google.dev/gemini-api/terms · OpenAI — openai.com/policies/api-data-usage-policies" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- About -->
+            <ScrollViewer x:Name="AboutPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                <StackPanel MaxWidth="680" HorizontalAlignment="Left">
+                    <TextBlock Text="About &amp; diagnostics" Style="{StaticResource SectionTitle}" />
+                    <TextBox x:Name="DiagnosticsText" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Cascadia Mono, Consolas" FontSize="12" MinHeight="300" />
+                    <Button Content="Refresh" Style="{StaticResource PlainButton}" HorizontalAlignment="Left" Margin="0,8,0,0" Click="RefreshDiagnostics_Click" />
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</Window>

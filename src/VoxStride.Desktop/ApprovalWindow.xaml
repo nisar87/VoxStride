@@ -1,0 +1,36 @@
+<Window x:Class="VoxStride.Desktop.ApprovalWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="VoxStride — approval needed" Width="560" SizeToContent="Height" MaxHeight="720"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Topmost="True" ShowInTaskbar="True"
+        FontFamily="{StaticResource UiFont}" AutomationProperties.Name="Approval needed">
+    <DockPanel Margin="24">
+        <StackPanel DockPanel.Dock="Top">
+            <TextBlock x:Name="TitleText" Style="{StaticResource SectionTitle}" TextWrapping="Wrap" />
+            <TextBlock x:Name="RiskText" Style="{StaticResource Caption}" Margin="0,0,0,12" />
+        </StackPanel>
+        <StackPanel DockPanel.Dock="Bottom" Margin="0,16,0,0">
+            <CheckBox x:Name="RememberBox" Visibility="Collapsed" Margin="0,0,0,12"
+                      Content="Always allow reversible organizing of this folder (you still say each command; nothing is deleted or overwritten)" />
+            <Grid>
+                <TextBlock x:Name="CountdownText" Style="{StaticResource Caption}" VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="DeclineButton" Content="Don't do it" Style="{StaticResource PlainButton}" Margin="0,0,8,0" IsCancel="True" Click="Decline_Click" />
+                    <!-- Not IsDefault: approval requires a deliberate click, never Enter or voice. -->
+                    <Button x:Name="ApproveButton" Content="Approve" Style="{StaticResource PrimaryButton}" Click="Approve_Click" />
+                </StackPanel>
+            </Grid>
+        </StackPanel>
+        <Border CornerRadius="8" Background="#10808080" Padding="12">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="420">
+                <ItemsControl x:Name="LinesList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,2" FontFamily="Cascadia Mono, Consolas, Segoe UI" FontSize="12.5" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+    </DockPanel>
+</Window>

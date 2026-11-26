@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>VoxStride</AssemblyName>
+    <RootNamespace>VoxStride.Desktop</RootNamespace>
+    <ApplicationIcon>Assets\voxstride.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <!-- WPF0001: Fluent ThemeMode is an evaluation API in .NET 10. -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
+    <!-- Avoid WinForms/WPF type-name ambiguity: only System.Windows.Forms.NotifyIcon is used, fully qualified. -->
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets\voxstride.png" />
+    <Content Include="Assets\voxstride.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VoxStride.Core\VoxStride.Core.csproj" />
+    <ProjectReference Include="..\VoxStride.Providers\VoxStride.Providers.csproj" />
+    <ProjectReference Include="..\VoxStride.Persistence\VoxStride.Persistence.csproj" />
+    <ProjectReference Include="..\VoxStride.Windows\VoxStride.Windows.csproj" />
+    <ProjectReference Include="..\VoxStride.Speech\VoxStride.Speech.csproj" />
+    <ProjectReference Include="..\VoxStride.Browser\VoxStride.Browser.csproj" />
+  </ItemGroup>
+</Project>

@@ -120,7 +120,8 @@ public sealed record ApprovalRequest(
     string ManifestDigest,
     string Title,
     IReadOnlyList<string> Lines,
-    RiskTier Risk);
+    RiskTier Risk,
+    string? Scope = null);
 
 public interface IUserApproval
 {

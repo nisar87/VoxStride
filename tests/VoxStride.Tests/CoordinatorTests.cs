@@ -329,3 +329,31 @@ public sealed class CoordinatorTests : IAsyncDisposable
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }
+
+public sealed class WakeTrailingTextTests : IAsyncDisposable
+{
+    private readonly FakeRecognizer _rec = new();
+    private readonly FakeSink _sink = new();
+    private readonly ConversationCoordinator _c;
+    public WakeTrailingTextTests() => _c = new ConversationCoordinator(_rec, null, _sink, new ControlPhraseDetector(new ControlPhraseOptions()), new CoordinatorOptions(), new ManualTime());
+    public ValueTask DisposeAsync() => _c.DisposeAsync();
+
+    [Fact]
+    public async Task WordsAfterWakePhraseStartTheCommandButDoNotCommit()
+    {
+        _c.ActivateFromWake("check how much space is left on C");
+        for (var i = 0; i < 3; i++) await _c.DrainAsync();
+        Assert.Empty(_sink.Commands);
+        _rec.Say("b", "VoxStride execute", 5000);
+        for (var i = 0; i < 4; i++) { await _c.DrainAsync(); await Task.Delay(5); }
+        Assert.Equal("check how much space is left on C", Assert.Single(_sink.Commands).FinalizedTranscript);
+    }
+
+    [Fact]
+    public async Task WakeAndFinishInOneBreathCommitsOnce()
+    {
+        _c.ActivateFromWake("open notepad VoxStride execute");
+        for (var i = 0; i < 4; i++) { await _c.DrainAsync(); await Task.Delay(5); }
+        Assert.Equal("open notepad", Assert.Single(_sink.Commands).FinalizedTranscript);
+    }
+}

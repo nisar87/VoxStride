@@ -20,7 +20,7 @@ env:
 
 jobs:
   core-linux:
-    name: Core tests (Linux)
+    name: Core + persistence tests (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -28,12 +28,10 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
-      - name: Restore
-        run: dotnet restore tests/VoxStride.Tests/VoxStride.Tests.csproj
-      - name: Build
-        run: dotnet build tests/VoxStride.Tests/VoxStride.Tests.csproj -c Release --no-restore
-      - name: Test
-        run: dotnet test tests/VoxStride.Tests/VoxStride.Tests.csproj -c Release --no-build --logger "trx;LogFileName=core-linux.trx" --logger "console;verbosity=normal" --results-directory TestResults
+      - name: Test core
+        run: dotnet test tests/VoxStride.Tests/VoxStride.Tests.csproj -c Release --logger "trx;LogFileName=core-linux.trx" --results-directory TestResults
+      - name: Test persistence
+        run: dotnet test tests/VoxStride.Tests.Persistence/VoxStride.Tests.Persistence.csproj -c Release --logger "trx;LogFileName=persistence-linux.trx" --results-directory TestResults
       - uses: actions/upload-artifact@v5
         if: always()
         with:
@@ -41,9 +39,9 @@ jobs:
           path: TestResults/
 
   windows:
-    name: Windows build, tests, package
+    name: Windows build, tests, installer
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
@@ -53,18 +51,40 @@ jobs:
         run: dotnet restore VoxStride.sln
       - name: Build
         run: dotnet build VoxStride.sln -c Release --no-restore
-      - name: Test
+      - name: Test (unit, contract, persistence, Windows integration)
         run: dotnet test VoxStride.sln -c Release --no-build --logger "trx" --logger "console;verbosity=normal" --results-directory TestResults
       - name: Vulnerable package audit
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force TestResults | Out-Null
           dotnet list VoxStride.sln package --vulnerable --include-transitive 2>&1 | Tee-Object -FilePath TestResults/vulnerable-packages.txt
           if (Select-String -Path TestResults/vulnerable-packages.txt -Pattern "has the following vulnerable packages") { Write-Error "Vulnerable packages found"; exit 1 }
+      - name: Dependency inventory (SBOM-lite)
+        shell: pwsh
+        run: dotnet list VoxStride.sln package --include-transitive --format json > TestResults/dependencies.json
+      - name: Publish (self-contained win-x64)
+        run: dotnet publish src/VoxStride.Desktop/VoxStride.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -o artifacts/publish/win-x64
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { choco install innosetup --no-progress -y | Out-Null; $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc /DAppVersion=0.1.0 "/DSourceDir=$PWD\artifacts\publish\win-x64" installer\VoxStride.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem artifacts/installer
+      - name: Install, smoke test, uninstall (clean runner)
+        shell: pwsh
+        run: scripts/Test-Installer.ps1 -Installer (Get-ChildItem artifacts/installer/*.exe | Select-Object -First 1).FullName -Evidence TestResults/installer-evidence.json
       - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: test-results-windows
           path: TestResults/
+      - uses: actions/upload-artifact@v5
+        with:
+          name: VoxStride-Setup-x64
+          path: artifacts/installer/*.exe
+          retention-days: 30
 
   secret-scan:
     name: Secret scan

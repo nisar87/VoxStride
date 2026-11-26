@@ -31,7 +31,7 @@ public sealed class CoordinatorOptions
 public sealed class ConversationCoordinator : IAsyncDisposable
 {
     private abstract record Msg;
-    private sealed record Activate(string Source) : Msg;
+    private sealed record Activate(string Source, string? TrailingText = null) : Msg;
     private sealed record Transcript(TranscriptEvent Event) : Msg;
     private sealed record Proceed : Msg;
     private sealed record CancelPressed : Msg;
@@ -86,7 +86,7 @@ public sealed class ConversationCoordinator : IAsyncDisposable
     }
 
     // ---- public inputs (thread-safe) ----
-    public void ActivateFromWake() => _inbox.Writer.TryWrite(new Activate("wake"));
+    public void ActivateFromWake(string? trailingText = null) => _inbox.Writer.TryWrite(new Activate("wake", trailingText));
     public void ActivateFromHotkey() => _inbox.Writer.TryWrite(new Activate("hotkey"));
     public void PressProceed() => _inbox.Writer.TryWrite(new Proceed());
     public void PressCancel() => _inbox.Writer.TryWrite(new CancelPressed());
@@ -142,6 +142,14 @@ public sealed class ConversationCoordinator : IAsyncDisposable
                 if (State is AgentState.Muted or AgentState.Paused) break;
                 if (_runActive || State is AgentState.Listening or AgentState.Finalizing or AgentState.Clarifying) break; // no second task
                 await StartListeningAsync();
+                if (!string.IsNullOrWhiteSpace(a.TrailingText) && _buffer is not null)
+                {
+                    // Words spoken in the same breath as the wake phrase ("Hey VoxStride, check C drive") are the start of the command.
+                    var first = new TranscriptEvent(_buffer.SessionId, "wake-trailing", 0, 1, true, a.TrailingText.Trim(), -1, 0, null);
+                    _buffer.Apply(first);
+                    HandleFinal(first);
+                    PublishTranscript();
+                }
                 break;
 
             case Transcript t:

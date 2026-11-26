@@ -85,7 +85,7 @@ public sealed class ApplyOrganizationTool(FileToolServices s) : ToolBase
         if (m.Items.Count > 25) lines.Add($"  …and {m.Items.Count - 25} more");
         lines.Add("Nothing is overwritten. You can undo afterwards.");
         return ValueTask.FromResult(ToolValidation.NeedsApproval(new ApprovalRequest(ctx.Auth.RunId, Definition.Name, StandingRuleOperations.ReversibleSameRootMove,
-            m.Digest, $"Move {m.Items.Count} file(s) into category folders", lines, RiskTier.Moderate)));
+            m.Digest, $"Move {m.Items.Count} file(s) into category folders", lines, RiskTier.Moderate, Scope: m.Root)));
     }
 
     public override async ValueTask<ToolResult> ExecuteAsync(JsonObject args, ToolContext ctx, CancellationToken ct)
