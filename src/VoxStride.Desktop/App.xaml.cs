@@ -22,6 +22,10 @@ public partial class App : Application
     private readonly AssistantViewModel _vm = new();
     private DispatcherTimer? _elapsedTimer;
     private bool _muted;
+    private readonly UpdateService _updates = new();
+    private DispatcherTimer? _updateTimer;
+    public Core.Updates.UpdateInfo? AvailableUpdate { get; private set; }
+    public event Action? UpdateStateChanged;
 
     public AppHost? Host { get; private set; }
     public AppSettings Settings { get; private set; } = new();
@@ -66,6 +70,12 @@ public partial class App : Application
 
         var background = e.Args.Contains("--background") && Settings.FirstRunCompleted;
         if (!background) _main.Show();
+        if (e.Args.Contains("--updated")) _vm.AddActivity($"VoxStride was updated to version {UpdateService.CurrentVersion.ToString(3)}.", "✔");
+        if (Settings.ActiveProvider is not null && !Settings.CloudSpeechConsent && Settings.MicrophoneConsent)
+            _vm.AddActivity("Tip: turn on Cloud speech in Voice settings — it understands accents and mixed Urdu/English much better.");
+        _updateTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
+        _updateTimer.Tick += async (_, _) => await MaybeCheckForUpdatesAsync(false);
+        _updateTimer.Start();
         _elapsedTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _elapsedTimer.Tick += (_, _) => _vm.TickElapsed();
         _elapsedTimer.Start();
@@ -104,6 +114,79 @@ public partial class App : Application
             t.Start();
         }
         else if (!Settings.ShowOverlay) _overlay.Hide();
+    }
+
+    // ---------- Updates ----------
+    private bool _updateBusy;
+    private DateTime _idleSince = DateTime.UtcNow;
+
+    public async Task MaybeCheckForUpdatesAsync(bool userRequested)
+    {
+        if (_updateBusy) return;
+        if (!userRequested)
+        {
+            if (_vm.State is not (AgentState.Standby or AgentState.Muted)) { _idleSince = DateTime.UtcNow; return; }
+            if (AvailableUpdate is not null)
+            {
+                // Auto-install only after VoxStride has been idle for 2 minutes, so it never interrupts you.
+                if (Settings.AutoInstallUpdates && DateTime.UtcNow - _idleSince > TimeSpan.FromMinutes(2)) await InstallUpdateAsync();
+                return;
+            }
+            if (!Settings.AutoCheckUpdates || DateTimeOffset.UtcNow - Settings.LastUpdateCheck < TimeSpan.FromHours(6)) return;
+        }
+        _updateBusy = true;
+        try
+        {
+            AvailableUpdate = await _updates.CheckAsync(CancellationToken.None);
+            Settings.LastUpdateCheck = DateTimeOffset.UtcNow;
+            Settings.Save();
+            if (AvailableUpdate is { } u)
+            {
+                _vm.AddActivity($"A new version ({u.Version.ToString(3)}) is available." + (Settings.AutoInstallUpdates ? " I'll install it when you're not using me." : " Open About to install it."), "⬆");
+                _tray?.ShowBalloonTip(5000, "VoxStride update", $"Version {u.Version.ToString(3)} is ready.", System.Windows.Forms.ToolTipIcon.Info);
+            }
+            else if (userRequested) _vm.AddActivity($"You're on the latest version ({UpdateService.CurrentVersion.ToString(3)}).");
+        }
+        catch (Exception ex)
+        {
+            if (userRequested) _vm.AddActivity("I couldn't check for updates: " + ex.Message, "!");
+        }
+        finally { _updateBusy = false; UpdateStateChanged?.Invoke(); }
+    }
+
+    public async Task InstallUpdateAsync()
+    {
+        if (AvailableUpdate is not { } u || _updateBusy) return;
+        if (Host?.Runs is not null && _vm.IsBusy) { _vm.AddActivity("I'll update after the current task finishes."); return; }
+        _updateBusy = true;
+        try
+        {
+            _vm.Status = $"Downloading VoxStride {u.Version.ToString(3)}…";
+            var path = await _updates.DownloadAsync(u, new Progress<double>(p => _vm.Status = $"Downloading update… {p:0}%"), CancellationToken.None);
+            _vm.AddActivity("Update verified. Installing — VoxStride will restart in a few seconds.", "⬆");
+            UpdateService.LaunchInstaller(path);
+            await Task.Delay(800);
+            ExitApp();
+        }
+        catch (Exception ex)
+        {
+            _vm.AddActivity("The update didn't install: " + ex.Message, "!");
+            _updateBusy = false;
+        }
+    }
+
+    /// <summary>Restarts VoxStride (used after changing speech engine settings).</summary>
+    public async void RestartApp()
+    {
+        IsExiting = true;
+        if (_tray is not null) { _tray.Visible = false; _tray.Dispose(); _tray = null; }
+        UnregisterHotkeys();
+        if (Host is not null) await Host.DisposeAsync();
+        _singleInstance?.ReleaseMutex();
+        _singleInstance?.Dispose();
+        _singleInstance = null;
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false });
+        Shutdown(0);
     }
 
     public void RefreshProviderLabel() =>
@@ -163,18 +246,19 @@ public partial class App : Application
         menu.Items.Add("Settings", null, (_, _) => Dispatcher.Invoke(() => ShowMain(2)));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => Dispatcher.Invoke(ExitApp));
+        _tray.BalloonTipClicked += (_, _) => Dispatcher.Invoke(() => ShowMain(5));
         _tray.MouseClick += (_, a) => { if (a.Button == System.Windows.Forms.MouseButtons.Left) Dispatcher.Invoke(() => ShowMain()); };
     }
 
     private async void ExitApp()
     {
         IsExiting = true;
-        if (_tray is not null) { _tray.Visible = false; _tray.Dispose(); }
+        if (_tray is not null) { _tray.Visible = false; _tray.Dispose(); _tray = null; }
         UnregisterHotkeys();
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         if (Host is not null) await Host.DisposeAsync();
-        _singleInstance?.ReleaseMutex();
+        try { _singleInstance?.ReleaseMutex(); } catch (ApplicationException) { }
         Shutdown(0);
     }
 
@@ -196,8 +280,10 @@ public partial class App : Application
     private void UnregisterHotkeys()
     {
         if (_hotkeySink is null) return;
-        UnregisterHotKey(_hotkeySink.Handle, HK_TALK); UnregisterHotKey(_hotkeySink.Handle, HK_STOP); UnregisterHotKey(_hotkeySink.Handle, HK_MUTE);
-        _hotkeySink.Dispose();
+        var sink = _hotkeySink;
+        _hotkeySink = null;
+        UnregisterHotKey(sink.Handle, HK_TALK); UnregisterHotKey(sink.Handle, HK_STOP); UnregisterHotKey(sink.Handle, HK_MUTE);
+        sink.Dispose();
     }
 
     private IntPtr HotkeyHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)

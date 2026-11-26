@@ -53,6 +53,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\VoxStride.exe"; Description: "Launch VoxStride"; Flags: nowait postinstall skipifsilent
+; In-app updates run the installer silently with /relaunch=1 so VoxStride restarts itself afterwards.
+Filename: "{app}\VoxStride.exe"; Parameters: "--updated"; Flags: nowait runasoriginaluser; Check: ShouldRelaunch
 
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/C taskkill /IM VoxStride.exe /F"; Flags: runhidden; RunOnceId: "StopVoxStride"
@@ -61,6 +63,11 @@ Filename: "{cmd}"; Parameters: "/C taskkill /IM VoxStride.exe /F"; Flags: runhid
 Type: filesandordirs; Name: "{app}"
 
 [Code]
+function ShouldRelaunch: Boolean;
+begin
+  Result := ExpandConstant('{param:relaunch|0}') = '1';
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   DataDir: string;

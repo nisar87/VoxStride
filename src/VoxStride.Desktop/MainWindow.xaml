@@ -175,6 +175,39 @@
                     <TextBlock Text="Voice" Style="{StaticResource SectionTitle}" />
                     <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,14"
                                Text="Speech recognition and the spoken voice use the speech engines installed in Windows and run on this PC. Pauses never end your instruction — say &quot;VoxStride, execute&quot;, click Proceed or press Ctrl+Alt+V when you're done." />
+                    <Border CornerRadius="10" Padding="14" Background="#10808080" Margin="0,0,0,14">
+                        <StackPanel>
+                            <TextBlock Text="Understanding your voice" FontWeight="SemiBold" FontSize="15" />
+                            <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,2,0,8"
+                                       Text="Cloud speech understands accents and mixed Urdu/English far better than the built-in Windows engine. Your voice is sent only while you're giving an instruction — never in standby." />
+                            <CheckBox x:Name="CloudSpeechBox" Content="Use cloud speech recognition (uses your OpenAI or Gemini key)" Margin="0,4" />
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <TextBlock Text="Engine" VerticalAlignment="Center" Width="90" />
+                                <ComboBox x:Name="EngineBox" Width="260">
+                                    <ComboBoxItem Content="Automatic (best available)" Tag="Auto" />
+                                    <ComboBoxItem Content="OpenAI (gpt-transcribe)" Tag="OpenAI" />
+                                    <ComboBoxItem Content="Gemini" Tag="Gemini" />
+                                    <ComboBoxItem Content="Windows (offline, English only)" Tag="Windows" />
+                                </ComboBox>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <TextBlock Text="Mic sensitivity" VerticalAlignment="Center" Width="90" />
+                                <Slider x:Name="SensitivitySlider" Width="260" Minimum="1.5" Maximum="6" TickFrequency="0.5" IsSnapToTickEnabled="True" IsDirectionReversed="True"
+                                        ToolTip="Left = picks up quieter speech; right = ignores more background noise" />
+                            </StackPanel>
+                            <TextBlock x:Name="EngineInfo" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,0" />
+                        </StackPanel>
+                    </Border>
+                    <Border CornerRadius="10" Padding="14" Background="#10808080" Margin="0,0,0,14">
+                        <StackPanel>
+                            <TextBlock Text="How VoxStride sounds" FontWeight="SemiBold" FontSize="15" />
+                            <CheckBox x:Name="NaturalVoiceBox" Content="Natural human-like voice (OpenAI, needs an OpenAI key)" Margin="0,6,0,4" />
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                <TextBlock Text="Voice" VerticalAlignment="Center" Width="90" />
+                                <ComboBox x:Name="CloudVoiceBox" Width="260" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                     <CheckBox x:Name="WakeBox" Content="Listen for &quot;Hey VoxStride&quot; (local, on this PC)" Margin="0,4" />
                     <CheckBox x:Name="PlainProceedBox" Content="Also accept a standalone &quot;Proceed&quot; to finish (less strict)" Margin="0,4" />
                     <CheckBox x:Name="SpeakBox" Content="Speak results aloud" Margin="0,4" />
@@ -182,11 +215,12 @@
                     <CheckBox x:Name="OverlayBox" Content="Show the floating assistant" Margin="0,4" />
                     <TextBlock Text="Recognition language" FontWeight="SemiBold" Margin="0,14,0,4" />
                     <ComboBox x:Name="CultureBox" Width="260" HorizontalAlignment="Left" />
-                    <TextBlock Text="Voice" FontWeight="SemiBold" Margin="0,14,0,4" />
+                    <TextBlock Text="Offline Windows voice (used when the natural voice isn't available)" FontWeight="SemiBold" Margin="0,14,0,4" />
                     <ComboBox x:Name="VoiceBox" Width="360" HorizontalAlignment="Left" />
                     <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
                         <Button Content="Save" Style="{StaticResource PrimaryButton}" Click="SaveVoice_Click" />
                         <Button Content="Test voice" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="TestVoice_Click" />
+                        <Button Content="Restart VoxStride" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="Restart_Click" ToolTip="Speech engine changes apply after a restart" />
                     </StackPanel>
                     <TextBlock x:Name="VoiceInfo" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,12,0,0" />
                 </StackPanel>
@@ -222,6 +256,18 @@
             <ScrollViewer x:Name="AboutPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
                 <StackPanel MaxWidth="680" HorizontalAlignment="Left">
                     <TextBlock Text="About &amp; diagnostics" Style="{StaticResource SectionTitle}" />
+                    <Border CornerRadius="10" Padding="14" Background="#10808080" Margin="0,0,0,14">
+                        <StackPanel>
+                            <TextBlock x:Name="VersionText" FontWeight="SemiBold" FontSize="15" />
+                            <TextBlock x:Name="UpdateText" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,0,8" />
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Check for updates" Style="{StaticResource PlainButton}" Click="CheckUpdates_Click" />
+                                <Button x:Name="InstallUpdateButton" Content="Install update now" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0" Visibility="Collapsed" Click="InstallUpdate_Click" />
+                            </StackPanel>
+                            <CheckBox x:Name="AutoUpdateBox" Content="Check for updates automatically" Margin="0,10,0,2" Click="UpdatePrefs_Click" />
+                            <CheckBox x:Name="AutoInstallBox" Content="Install updates automatically when I'm not using VoxStride" Margin="0,2" Click="UpdatePrefs_Click" />
+                        </StackPanel>
+                    </Border>
                     <TextBox x:Name="DiagnosticsText" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Cascadia Mono, Consolas" FontSize="12" MinHeight="300" />
                     <Button Content="Refresh" Style="{StaticResource PlainButton}" HorizontalAlignment="Left" Margin="0,8,0,0" Click="RefreshDiagnostics_Click" />
                 </StackPanel>

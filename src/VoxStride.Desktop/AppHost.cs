@@ -92,7 +92,8 @@ public sealed class AppHost : IAsyncDisposable
     public RunCoordinator Runs { get; }
     public ConversationCoordinator Conversation { get; }
     public ISpeechRecognizer Recognizer { get; }
-    public WindowsSpeechSynthesizer? Speech { get; }
+    public NaturalSpeechSynthesizer? Speech { get; }
+    public string SpeechEngineLabel { get; private set; } = "off";
     public WindowsWakeWordDetector? Wake { get; private set; }
     public PlaywrightBrowserController Browser { get; }
     public FileToolServices FileServices { get; }
@@ -123,7 +124,11 @@ public sealed class AppHost : IAsyncDisposable
 
         if (enableSpeech)
         {
-            try { Speech = new WindowsSpeechSynthesizer(settings.Voice, settings.VoiceRate) { Enabled = settings.SpeakResults, CuesEnabled = settings.AudioCues }; }
+            try
+            {
+                var local = new WindowsSpeechSynthesizer(settings.Voice, settings.VoiceRate) { Enabled = settings.SpeakResults, CuesEnabled = settings.AudioCues };
+                Speech = new NaturalSpeechSynthesizer(local, CreateCloudVoice());
+            }
             catch (Exception) { Speech = null; } // no audio output device; text feedback still works
         }
 
@@ -131,17 +136,52 @@ public sealed class AppHost : IAsyncDisposable
             new RunOptions { MaxSteps = settings.MaxSteps, MaxDuration = TimeSpan.FromSeconds(settings.MaxRunSeconds), MaxTokensPerRun = settings.MaxTokensPerRun, SpeakResults = settings.SpeakResults }, time);
 
         var control = new ControlPhraseDetector(new ControlPhraseOptions { AllowPlainProceed = settings.AllowPlainProceed });
-        Recognizer = enableSpeech
-            ? new WindowsSpeechRecognizer(settings.SpeechCulture, ["VoxStride execute", "VoxStride proceed", "assistant proceed", "execute now", "cancel", "never mind", "scratch that", "undo last sentence", "stop listening"])
-            : new NullRecognizer();
+        Recognizer = enableSpeech ? CreateRecognizer() : new NullRecognizer();
+        var cloudSpeech = Recognizer is CloudSpeechRecognizer;
         Conversation = new ConversationCoordinator(Recognizer, Speech, Runs, control, new CoordinatorOptions
         {
             InactivityReminder = TimeSpan.FromSeconds(settings.InactivityReminderSeconds),
             InactivityDiscard = TimeSpan.FromSeconds(settings.InactivityDiscardSeconds),
             Language = settings.SpeechCulture,
+            FinalizeFlushTimeout = cloudSpeech ? TimeSpan.FromSeconds(8) : TimeSpan.FromMilliseconds(1500),
             SelectedProvider = () => settings.ActiveProvider?.ToString(),
         }, time);
     }
+
+    /// <summary>Picks the speech recognizer: cloud (better for accents and mixed languages) only with explicit consent and a key.</summary>
+    private ISpeechRecognizer CreateRecognizer()
+    {
+        var openAiKey = Secrets.Load(ProviderSelector.SecretName(ProviderKind.OpenAI));
+        var geminiKey = Secrets.Load(ProviderSelector.SecretName(ProviderKind.Gemini));
+        ITranscriber? cloud = null;
+        if (Settings.CloudSpeechConsent)
+        {
+            cloud = Settings.SpeechEngine switch
+            {
+                SpeechEngine.OpenAI when !string.IsNullOrEmpty(openAiKey) => new OpenAITranscriber(openAiKey),
+                SpeechEngine.Gemini when !string.IsNullOrEmpty(geminiKey) => new GeminiTranscriber(geminiKey, Settings.Models.GetValueOrDefault(ProviderKind.Gemini, ProviderFactory.DefaultModel(ProviderKind.Gemini))),
+                SpeechEngine.Auto when !string.IsNullOrEmpty(openAiKey) => new OpenAITranscriber(openAiKey),
+                SpeechEngine.Auto when !string.IsNullOrEmpty(geminiKey) => new GeminiTranscriber(geminiKey, Settings.Models.GetValueOrDefault(ProviderKind.Gemini, ProviderFactory.DefaultModel(ProviderKind.Gemini))),
+                _ => null,
+            };
+        }
+        if (cloud is not null && WaveInRecorder.HasMicrophone())
+        {
+            SpeechEngineLabel = cloud.Name;
+            return new CloudSpeechRecognizer(cloud, Settings.MicSensitivity);
+        }
+        SpeechEngineLabel = "Windows (offline)";
+        return new WindowsSpeechRecognizer(Settings.SpeechCulture, ["VoxStride execute", "VoxStride proceed", "assistant proceed", "execute now", "cancel", "never mind", "scratch that", "undo last sentence", "stop listening"]);
+    }
+
+    private ICloudVoice? CreateCloudVoice()
+    {
+        if (!Settings.NaturalVoice) return null;
+        var key = Secrets.Load(ProviderSelector.SecretName(ProviderKind.OpenAI));
+        return string.IsNullOrEmpty(key) ? null : new OpenAIVoice(key, Settings.CloudVoiceName);
+    }
+
+    public void RefreshVoice() { if (Speech is not null) Speech.Cloud = CreateCloudVoice(); }
 
     public async Task StartAsync(CancellationToken ct)
     {

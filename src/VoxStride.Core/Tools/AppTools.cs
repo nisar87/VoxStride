@@ -40,7 +40,7 @@ public sealed class LaunchAppTool(IAppCatalog catalog, IAppController controller
         if (r.App is null)
             return ValueTask.FromResult(r.Candidates.Count > 0
                 ? ToolValidation.Invalid("ambiguous_app", "Which one: " + string.Join(", ", r.Candidates.Take(5).Select(c => c.DisplayName)) + "?")
-                : ToolValidation.Invalid("app_not_found", catalog.IsReady ? $"I couldn't find an installed app called '{Str(args, "name")}'." : "The app list is still loading. Try again in a moment."));
+                : ToolValidation.Invalid("app_not_found", catalog.IsReady ? $"I couldn't find an app called {Str(args, "name")} on this PC." : "The app list is still loading. Try again in a moment."));
         ctx.Items["app"] = r.App;
         return ValueTask.FromResult(ToolValidation.Valid());
     }
@@ -52,7 +52,7 @@ public sealed class LaunchAppTool(IAppCatalog catalog, IAppController controller
         var w = await controller.LaunchAsync(app, TimeSpan.FromSeconds(10), ct);
         if (w is null) return new ToolResult(ToolOutcome.Unknown, null, "no_window", $"{app.DisplayName} was started but no window appeared yet.", false, false, [], null, TimeSpan.Zero);
         ctx.Items["window"] = w;
-        return ToolResult.Ok(new JsonObject { ["app"] = app.DisplayName, ["processId"] = w.ProcessId, ["windowTitle"] = w.Title }, $"Opened {app.DisplayName}.", false);
+        return ToolResult.Ok(new JsonObject { ["app"] = app.DisplayName, ["processId"] = w.ProcessId, ["windowTitle"] = w.Title }, $"{app.DisplayName} is open.", false);
     }
 
     public override async ValueTask<ToolVerification> VerifyAsync(JsonObject args, ToolResult result, ToolContext ctx, CancellationToken ct)
@@ -120,7 +120,7 @@ public sealed class EditorWriteTool(IEditorAdapter editor, IAppCatalog catalog) 
         ctx.Items["result"] = r;
         var state = new JsonObject { ["editor"] = kind.ToString(), ["characters"] = text.Length, ["readBackVerified"] = r.ReadBackVerified };
         return new ToolResult(ToolOutcome.Success, state, null,
-            r.ReadBackVerified ? $"Wrote {text.Length} characters into a new {(kind == EditorKind.Notepad ? "Notepad" : "Notepad++")} document and verified it." : "Text was typed but could not be read back to verify.",
+            r.ReadBackVerified ? $"Done — it's written in a new {(kind == EditorKind.Notepad ? "Notepad" : "Notepad++")} document. I haven't saved it, so you can edit it first." : "I typed the text, but couldn't double-check it, so please have a quick look.",
             r.ReadBackVerified, false, [], null, TimeSpan.Zero);
     }
 

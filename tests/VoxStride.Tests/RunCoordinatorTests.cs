@@ -72,7 +72,7 @@ public sealed class RunCoordinatorTests : IDisposable
             var r = await rc.RunAsync(Cmd("how much space is left on C"), CancellationToken.None);
             times.Add(sw.Elapsed.TotalMilliseconds);
             Assert.True(r.Success);
-            Assert.Contains("123.46 GB", r.SpokenSummary);
+            Assert.Contains("about 123 gigabytes free on drive C", r.SpokenSummary);
         }
         Assert.Equal(0, sel.Calls);
         Assert.Equal(0, provider.Conversations);
@@ -93,7 +93,7 @@ public sealed class RunCoordinatorTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_h.Desktop.Path, "c.zip")));
         Assert.True(File.Exists(Path.Combine(_h.Desktop.Path, "Link.lnk")));
         Assert.True(File.Exists(Path.Combine(_h.Desktop.Path, "PDFs", "a.pdf")));
-        Assert.Contains("Moved 2 of 2", r.SpokenSummary);
+        Assert.Contains("I moved 2 of 2 files", r.SpokenSummary);
     }
 
     [Fact]
@@ -166,7 +166,7 @@ public sealed class RunCoordinatorTests : IDisposable
         var rc = Make(new CountingSelector(p));
         var r = await rc.RunAsync(Cmd("write me a haiku about rain in notepad"), CancellationToken.None);
         Assert.False(r.Success);
-        Assert.Contains("rejected the API key", r.SpokenSummary);
+        Assert.Contains("didn't accept your API key", r.SpokenSummary);
         var d = await rc.RunAsync(Cmd("check C drive"), CancellationToken.None);
         Assert.True(d.Success);
     }
@@ -177,7 +177,7 @@ public sealed class RunCoordinatorTests : IDisposable
         var rc = Make(new CountingSelector(null));
         var r = await rc.RunAsync(Cmd("write a poem about Lahore"), CancellationToken.None);
         Assert.False(r.Success);
-        Assert.Contains("none is configured", r.SpokenSummary);
+        Assert.Contains("need an AI key", r.SpokenSummary);
     }
 
     [Fact]

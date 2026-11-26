@@ -140,6 +140,16 @@ public static class Bytes
         return i == 0 ? $"{bytes:N0} bytes" : $"{v:0.##} {u[i]}";
     }
 
+    /// <summary>Rounded, speech-friendly size ("about 30 gigabytes").</summary>
+    public static string Spoken(long bytes)
+    {
+        double gb = bytes / 1e9, mb = bytes / 1e6;
+        if (gb >= 10) return $"about {gb:0} gigabytes";
+        if (gb >= 1) return $"about {gb:0.#} gigabytes";
+        if (mb >= 1) return $"about {mb:0} megabytes";
+        return bytes < 1000 ? $"{bytes} bytes" : $"about {bytes / 1000.0:0} kilobytes";
+    }
+
     public static string FormatBinary(long bytes)
     {
         string[] u = ["bytes", "KiB", "MiB", "GiB", "TiB"];

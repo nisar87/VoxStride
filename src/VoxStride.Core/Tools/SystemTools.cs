@@ -59,7 +59,7 @@ public sealed class GetFreeSpaceTool(IDriveInfoSource drives) : ToolBase
     {
         var letter = Str(args, "driveLetter").ToUpperInvariant();
         var d = drives.Get(letter);
-        if (d is null) return ValueTask.FromResult(ToolResult.Fail("drive_not_found", $"Drive {letter} was not found."));
+        if (d is null) return ValueTask.FromResult(ToolResult.Fail("drive_not_found", $"I couldn't find a drive {letter} on this PC."));
         if (!d.Ready) return ValueTask.FromResult(ToolResult.Fail("drive_not_ready", $"Drive {letter} is not ready."));
         var state = new JsonObject
         {
@@ -74,7 +74,9 @@ public sealed class GetFreeSpaceTool(IDriveInfoSource drives) : ToolBase
             ["percentFree"] = d.TotalBytes > 0 ? Math.Round(100.0 * d.AvailableToUserBytes / d.TotalBytes, 1) : 0,
             ["format"] = d.Format,
         };
-        var msg = $"Drive {letter}: has {Bytes.Format(d.AvailableToUserBytes)} free of {Bytes.Format(d.TotalBytes)} ({state["percentFree"]}% free).";
+        var pct = d.TotalBytes > 0 ? 100.0 * d.AvailableToUserBytes / d.TotalBytes : 0;
+        var mood = pct < 10 ? " That's getting low — want me to clean up temp files?" : pct < 20 ? " It's getting a bit full." : "";
+        var msg = $"You've got {Bytes.Spoken(d.AvailableToUserBytes)} free on drive {letter}, out of {Bytes.Spoken(d.TotalBytes)} — about {pct:0}% free.{mood}";
         return ValueTask.FromResult(ToolResult.Ok(state, msg, verified: true));
     }
 }

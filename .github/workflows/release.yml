@@ -1,0 +1,71 @@
+name: Release
+
+# Publishes a GitHub Release (installer + SHA256SUMS.txt) when a version tag like v0.2.0 is pushed.
+# The in-app updater reads the latest release, verifies the checksum and installs it per-user.
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 0.2.0). A tag v<version> is created on the selected commit."
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  CI: "true"
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ github.event.inputs.version }}" } else { "${{ github.ref_name }}".TrimStart('v') }
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { Write-Error "Invalid version '$v'"; exit 1 }
+          "version=$v" >> $env:GITHUB_OUTPUT
+      - name: Build and test
+        run: |
+          dotnet restore VoxStride.sln
+          dotnet build VoxStride.sln -c Release --no-restore -p:Version=${{ steps.ver.outputs.version }}
+          dotnet test VoxStride.sln -c Release --no-build
+      - name: Publish
+        run: dotnet publish src/VoxStride.Desktop/VoxStride.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -p:Version=${{ steps.ver.outputs.version }} -o artifacts/publish/win-x64
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { choco install innosetup --no-progress -y | Out-Null; $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc /DAppVersion=${{ steps.ver.outputs.version }} "/DSourceDir=$PWD\artifacts\publish\win-x64" installer\VoxStride.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify installer (install, smoke test, uninstall)
+        shell: pwsh
+        run: scripts/Test-Installer.ps1 -Installer (Get-ChildItem artifacts/installer/*.exe | Select-Object -First 1).FullName -Evidence artifacts/installer-evidence.json
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Push-Location artifacts/installer
+          Get-ChildItem *.exe | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name } | Set-Content -Encoding ascii SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+          Pop-Location
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $notes = if (Test-Path "docs/releases/v$v.md") { "docs/releases/v$v.md" } else { $null }
+          $ghArgs = @("v$v", "artifacts/installer/VoxStride-Setup-$v-x64.exe", "artifacts/installer/SHA256SUMS.txt", "--title", "VoxStride $v", "--target", "${{ github.sha }}")
+          if ($notes) { $ghArgs += @("--notes-file", $notes) } else { $ghArgs += @("--generate-notes") }
+          gh release create @ghArgs

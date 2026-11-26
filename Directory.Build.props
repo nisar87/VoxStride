@@ -9,7 +9,7 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <Company>VoxStride</Company>
     <Product>VoxStride</Product>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <!-- CA1416: platform checks are enforced by project TFM split (Windows code lives in *-windows projects). -->
     <NoWarn>$(NoWarn);CA1416;NETSDK1206</NoWarn>
   </PropertyGroup>

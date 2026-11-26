@@ -63,11 +63,68 @@ public sealed partial class ControlPhraseDetector(ControlPhraseOptions options)
             return new ControlResult(ControlKind.Finish, RestoreCase(raw, before));
         }
 
+        // Accent-tolerant match: "<voxstride-like> <execute-like>" at the end (e.g. "box stride exicute", "VoxStride chalo").
+        if (FuzzyFinish(t) is { } fuzzy)
+        {
+            var before = fuzzy.Before;
+            if (looksQuoted || contentVerb && MentionsPhraseAsContent().IsMatch(before) || Negated().IsMatch(before + " "))
+                return new ControlResult(ControlKind.FinishUncertain, before.Length == 0 ? null : RestoreCase(raw, before));
+            var sure = fuzzy.Score >= 0.84 && (confidence is null || confidence >= options.MinConfidence);
+            return new ControlResult(sure ? ControlKind.Finish : ControlKind.FinishUncertain, before.Length == 0 ? null : RestoreCase(raw, before));
+        }
+
         // Plain trailing "proceed"/"execute" is ambiguous: keep as content but flag so the UI can ask "Ready to execute?".
         if (TrailingPlainFinish().IsMatch(t) && !looksQuoted && !contentVerb)
             return new ControlResult(ControlKind.FinishUncertain, raw);
 
         return new ControlResult(ControlKind.Content, raw);
+    }
+
+    private static readonly string[] FinishVerbs = ["execute", "proceed", "chalo", "karo", "kardo", "shuru", "start", "go"];
+
+    internal sealed record FuzzyMatch(string Before, double Score);
+
+    /// <summary>
+    /// Matches a distinctive wake-name token (1–2 words resembling "voxstride") followed by a finish verb at the end of
+    /// the utterance. Requires the name: a bare "execute" never matches here.
+    /// </summary>
+    internal static FuzzyMatch? FuzzyFinish(string t)
+    {
+        var w = t.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (w.Length < 2) return null;
+        // finish verb may be one word ("execute") or "kar do"/"shuru karo"
+        var verbWords = 1;
+        var verb = w[^1];
+        if (w.Length >= 3 && (w[^2] + w[^1]) is "kardo" or "shurukaro") { verbWords = 2; verb = w[^2] + w[^1]; }
+        var verbScore = FinishVerbs.Max(v => Similarity(verb, v));
+        if (verbScore < 0.72) return null;
+        if (verb.Length <= 3 && verbScore < 1) return null; // short verbs ("go") must be exact
+        for (var nameWords = 2; nameWords >= 1; nameWords--)
+        {
+            var nameEnd = w.Length - verbWords;
+            var nameStart = nameEnd - nameWords;
+            if (nameStart < 0) continue;
+            var name = string.Concat(w[nameStart..nameEnd]);
+            var nameScore = Similarity(name, "voxstride");
+            if (nameScore < 0.7) continue;
+            var score = Math.Min(nameScore, verbScore);
+            return new FuzzyMatch(string.Join(' ', w[..nameStart]).TrimEnd(',', '.'), score);
+        }
+        return null;
+    }
+
+    /// <summary>Normalized Levenshtein similarity (1 = identical).</summary>
+    internal static double Similarity(string a, string b)
+    {
+        if (a == b) return 1;
+        if (a.Length == 0 || b.Length == 0) return 0;
+        var d = new int[a.Length + 1, b.Length + 1];
+        for (var i = 0; i <= a.Length; i++) d[i, 0] = i;
+        for (var j = 0; j <= b.Length; j++) d[0, j] = j;
+        for (var i = 1; i <= a.Length; i++)
+            for (var j = 1; j <= b.Length; j++)
+                d[i, j] = Math.Min(Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1), d[i - 1, j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
+        return 1.0 - (double)d[a.Length, b.Length] / Math.Max(a.Length, b.Length);
     }
 
     private static bool IsWhole(string t, params string[] phrases) => phrases.Any(p => t == p);

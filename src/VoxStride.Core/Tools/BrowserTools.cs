@@ -75,7 +75,7 @@ public sealed class BrowserOpenUrlTool(IBrowserController browser) : ToolBase
     {
         var page = await browser.OpenUrlAsync(new Uri(Str(args, "url")), ct);
         ctx.Items["page"] = page;
-        return ToolResult.Ok(new JsonObject { ["url"] = page.Url, ["title"] = page.Title }, $"Opened {page.Title}.", false);
+        return ToolResult.Ok(new JsonObject { ["url"] = page.Url, ["title"] = page.Title }, $"I've opened {page.Title}.", false);
     }
 
     public override ValueTask<ToolVerification> VerifyAsync(JsonObject args, ToolResult result, ToolContext ctx, CancellationToken ct)
@@ -111,7 +111,7 @@ public sealed class YouTubePlayTool(IBrowserController browser) : ToolBase
         var play = await browser.OpenVideoAndVerifyAsync(sel.Selected, ct);
         ctx.Items["play"] = play;
         ctx.Items["card"] = sel.Selected;
-        return ToolResult.Ok(new JsonObject { ["title"] = play.Title, ["url"] = play.Url, ["playing"] = play.Playing }, play.Playing ? $"Playing \"{sel.Selected.Title}\"." : $"Opened \"{sel.Selected.Title}\" but playback did not start (the browser may require a click).", false);
+        return ToolResult.Ok(new JsonObject { ["title"] = play.Title, ["url"] = play.Url, ["playing"] = play.Playing }, play.Playing ? $"Now playing \"{sel.Selected.Title}\"." : $"I opened \"{sel.Selected.Title}\", but it didn't start playing — you may need to click play.", false);
     }
 
     public override ValueTask<ToolVerification> VerifyAsync(JsonObject args, ToolResult result, ToolContext ctx, CancellationToken ct)
@@ -145,7 +145,7 @@ public sealed class ChatGptDraftTool(IBrowserController browser) : ToolBase
         var (drafted, readBack) = await browser.ChatGptDraftAsync(Str(args, "prompt"), ct);
         ctx.Items["readBack"] = readBack;
         return drafted
-            ? ToolResult.Ok(new JsonObject { ["submitted"] = false, ["characters"] = readBack.Length }, "Prompt drafted in ChatGPT and not sent. Review it and press Enter to send.", false)
+            ? ToolResult.Ok(new JsonObject { ["submitted"] = false, ["characters"] = readBack.Length }, "I've typed your prompt into ChatGPT but haven't sent it. Have a look and press Enter when you're happy.", false)
             : ToolResult.Fail("draft_failed", "Could not find the ChatGPT message box. You may need to sign in first in the VoxStride browser window.");
     }
 

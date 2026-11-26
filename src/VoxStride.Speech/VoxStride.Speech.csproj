@@ -2,11 +2,13 @@
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <RootNamespace>VoxStride.Speech</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Speech" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\VoxStride.Contracts\VoxStride.Contracts.csproj" />
+    <ProjectReference Include="..\VoxStride.Core\VoxStride.Core.csproj" />
+    <ProjectReference Include="..\VoxStride.Providers\VoxStride.Providers.csproj" />
   </ItemGroup>
 </Project>

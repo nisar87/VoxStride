@@ -8,6 +8,8 @@ using VoxStride.Providers;
 
 namespace VoxStride.Desktop;
 
+public enum SpeechEngine { Auto, Windows, OpenAI, Gemini }
+
 /// <summary>Non-secret user settings (JSON in %LocalAppData%\VoxStride). API keys live in Windows Credential Manager.</summary>
 public sealed class AppSettings
 {
@@ -22,6 +24,16 @@ public sealed class AppSettings
         [ProviderKind.Gemini] = ProviderFactory.DefaultModel(ProviderKind.Gemini),
     };
     public string SpeechCulture { get; set; } = "en-US";
+    /// <summary>Auto = cloud speech when allowed and an OpenAI/Gemini key exists, otherwise Windows offline speech.</summary>
+    public SpeechEngine SpeechEngine { get; set; } = SpeechEngine.Auto;
+    /// <summary>Explicit consent to send voice audio (only while giving an instruction) to the chosen speech service.</summary>
+    public bool CloudSpeechConsent { get; set; }
+    public bool NaturalVoice { get; set; } = true;
+    public string CloudVoiceName { get; set; } = "marin";
+    public double MicSensitivity { get; set; } = 3.0;
+    public bool AutoCheckUpdates { get; set; } = true;
+    public bool AutoInstallUpdates { get; set; } = true;
+    public DateTimeOffset LastUpdateCheck { get; set; }
     public string? Voice { get; set; }
     public int VoiceRate { get; set; } = 1;
     public bool SpeakResults { get; set; } = true;

@@ -34,6 +34,7 @@ public partial class MainWindow : Window
         Nav.SelectedIndex = 0;
         WelcomePanel.Visibility = app.Settings.FirstRunCompleted ? Visibility.Collapsed : Visibility.Visible;
         Loaded += (_, _) => { LoadSettingsIntoUi(); CommandBox.Focus(); };
+        app.UpdateStateChanged += () => Dispatcher.BeginInvoke(RefreshUpdateUi);
     }
 
     protected override void OnClosing(CancelEventArgs e)
@@ -159,6 +160,18 @@ public partial class MainWindow : Window
             ? "No Windows speech recognizer is installed. Install an English speech pack (Settings › Time & language › Speech) to use voice. Typed commands still work."
             : $"Installed recognizers: {string.Join(", ", cultures)}. Voices: {voices.Count}.";
 
+        CloudSpeechBox.IsChecked = s.CloudSpeechConsent;
+        foreach (ComboBoxItem item in EngineBox.Items) if ((string)item.Tag == s.SpeechEngine.ToString()) EngineBox.SelectedItem = item;
+        SensitivitySlider.Value = s.MicSensitivity;
+        NaturalVoiceBox.IsChecked = s.NaturalVoice;
+        CloudVoiceBox.ItemsSource = OpenAIVoice.Voices;
+        CloudVoiceBox.SelectedItem = s.CloudVoiceName;
+        var hasOpenAi = _app.Host!.Secrets.Load(ProviderSelector.SecretName(ProviderKind.OpenAI)) is { Length: > 0 };
+        var hasGemini = _app.Host.Secrets.Load(ProviderSelector.SecretName(ProviderKind.Gemini)) is { Length: > 0 };
+        EngineInfo.Text = $"Currently using: {_app.Host.SpeechEngineLabel}." + (!hasOpenAi && !hasGemini ? " Add an OpenAI or Gemini key under Reasoning providers to enable cloud speech." : "");
+        AutoUpdateBox.IsChecked = s.AutoCheckUpdates;
+        AutoInstallBox.IsChecked = s.AutoInstallUpdates;
+        RefreshUpdateUi();
         MicConsentBox.IsChecked = s.MicrophoneConsent; RetainBox.IsChecked = s.RetainTranscripts; StartupBox.IsChecked = s.LaunchAtLogon;
         _app.RefreshProviderLabel();
     }
@@ -266,7 +279,19 @@ public partial class MainWindow : Window
         s.SpeakResults = SpeakBox.IsChecked == true; s.AudioCues = CuesBox.IsChecked == true; s.ShowOverlay = OverlayBox.IsChecked == true;
         if (CultureBox.SelectedItem is string c) s.SpeechCulture = c;
         if (VoiceBox.SelectedItem is string v) s.Voice = v;
+        var engineBefore = (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity);
+        s.CloudSpeechConsent = CloudSpeechBox.IsChecked == true;
+        if (EngineBox.SelectedItem is ComboBoxItem { Tag: string tag }) s.SpeechEngine = Enum.Parse<SpeechEngine>(tag);
+        s.MicSensitivity = SensitivitySlider.Value;
+        s.NaturalVoice = NaturalVoiceBox.IsChecked == true;
+        if (CloudVoiceBox.SelectedItem is string cv) s.CloudVoiceName = cv;
         s.Save();
+        _app.Host!.RefreshVoice();
+        if (engineBefore != (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity))
+        {
+            if (MessageBox.Show(this, "The new speech settings take effect after VoxStride restarts. Restart now?", "VoxStride", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            { _app.RestartApp(); return; }
+        }
         if (_app.Host!.Speech is { } sp) { sp.Enabled = s.SpeakResults; sp.CuesEnabled = s.AudioCues; }
         if (wakeChanged) { if (s.WakeWordEnabled) await _app.Host.StartWakeAsync(); else await _app.Host.StopWakeAsync(); }
         _app.ApplyOverlayVisibility();
@@ -274,7 +299,35 @@ public partial class MainWindow : Window
     }
 
     private void TestVoice_Click(object sender, RoutedEventArgs e) =>
-        _ = _app.Host!.Speech?.SpeakAsync("VoxStride is ready. Say Hey VoxStride, give your instruction, then say VoxStride, execute.", CancellationToken.None);
+        _ = _app.Host!.Speech?.SpeakAsync("Hi! I'm VoxStride. Just tell me what you need, take your time, and say VoxStride, execute when you're done.", CancellationToken.None);
+
+    private void Restart_Click(object sender, RoutedEventArgs e) => _app.RestartApp();
+
+    // ---------- Updates ----------
+    private void RefreshUpdateUi()
+    {
+        VersionText.Text = $"VoxStride {UpdateService.CurrentVersion.ToString(3)}";
+        if (_app.AvailableUpdate is { } u)
+        {
+            UpdateText.Text = $"Version {u.Version.ToString(3)} is available." + (string.IsNullOrWhiteSpace(u.Notes) ? "" : " " + (u.Notes.Length > 300 ? u.Notes[..300] + "…" : u.Notes));
+            InstallUpdateButton.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            UpdateText.Text = _app.Settings.LastUpdateCheck == default ? "Updates come from the official GitHub releases and are checksum-verified before installing." : $"Last checked {_app.Settings.LastUpdateCheck.ToLocalTime():g}. You're up to date.";
+            InstallUpdateButton.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private async void CheckUpdates_Click(object sender, RoutedEventArgs e) { UpdateText.Text = "Checking…"; await _app.MaybeCheckForUpdatesAsync(true); RefreshUpdateUi(); }
+    private async void InstallUpdate_Click(object sender, RoutedEventArgs e) => await _app.InstallUpdateAsync();
+
+    private void UpdatePrefs_Click(object sender, RoutedEventArgs e)
+    {
+        _app.Settings.AutoCheckUpdates = AutoUpdateBox.IsChecked == true;
+        _app.Settings.AutoInstallUpdates = AutoInstallBox.IsChecked == true;
+        _app.Settings.Save();
+    }
 
     // ---------- Privacy ----------
     private async void SavePrivacy_Click(object sender, RoutedEventArgs e)

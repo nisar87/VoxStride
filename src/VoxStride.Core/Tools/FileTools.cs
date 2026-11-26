@@ -57,7 +57,7 @@ public sealed class PreviewOrganizationTool(FileToolServices s) : ToolBase
         };
         var m = s.Planner.Preview(root, opts, s.PolicyFor(root));
         s.Manifests.Put(m);
-        var msg = m.Items.Count == 0 ? "Nothing to move." : $"{m.Items.Count} file(s) would move into {m.Items.Select(i => i.Category).Distinct().Count()} folder(s); {m.Skipped.Count} left in place.";
+        var msg = m.Items.Count == 0 ? "There's nothing to move." : $"I can move {m.Items.Count} files into {m.Items.Select(i => i.Category).Distinct().Count()} folders and leave {m.Skipped.Count} items as they are.";
         return ValueTask.FromResult(ToolResult.Ok(m.Summary(), msg, verified: true));
     }
 
@@ -102,7 +102,10 @@ public sealed class ApplyOrganizationTool(FileToolServices s) : ToolBase
             ["undoAvailable"] = r.Moved > 0,
         };
         var outcome = r.Failed + r.Unknown + r.Skipped == 0 ? ToolOutcome.Success : r.Moved > 0 ? ToolOutcome.Partial : ToolOutcome.Failure;
-        var msg = $"Moved {r.Moved} of {m.Items.Count} file(s)." + (r.Skipped + r.Failed + r.Unknown > 0 ? $" {r.Skipped} skipped, {r.Failed} failed, {r.Unknown} unverified." : "");
+        var folders = m.Items.Select(i => i.Category).Distinct().Count();
+        var issues = r.Skipped + r.Failed + r.Unknown;
+        var msg = r.Moved == 0 ? "I couldn't move any files — they changed or were in use, so I left everything as it was."
+            : $"Done! I moved {r.Moved} of {m.Items.Count} files into {folders} folder{(folders == 1 ? "" : "s")}." + (issues > 0 ? $" {issues} couldn't be moved because they were in use or changed." : "") + " Just say \"undo that\" if you want them back.";
         return new ToolResult(outcome, state, null, msg, false, false, r.MovedDestinations, m.ManifestId, TimeSpan.Zero);
     }
 
@@ -149,7 +152,7 @@ public sealed class UndoOrganizationTool(FileToolServices s) : ToolBase
         var r = await s.Executor.UndoAsync(id, s.PolicyFor(root), ctx, ct);
         var state = new JsonObject { ["restored"] = r.Moved, ["conflicts"] = r.Skipped, ["failed"] = r.Failed };
         var outcome = r.Skipped + r.Failed == 0 ? ToolOutcome.Success : r.Moved > 0 ? ToolOutcome.Partial : ToolOutcome.Failure;
-        return new ToolResult(outcome, state, null, $"Restored {r.Moved} file(s)." + (r.Skipped > 0 ? $" {r.Skipped} left in place because they changed or the original spot is taken." : ""), false, false, r.MovedDestinations, null, TimeSpan.Zero);
+        return new ToolResult(outcome, state, null, $"Okay, I put {r.Moved} file{(r.Moved == 1 ? "" : "s")} back where they were." + (r.Skipped > 0 ? $" I left {r.Skipped} alone because they were edited or something new is in their old spot." : ""), false, false, r.MovedDestinations, null, TimeSpan.Zero);
     }
 
     public override ValueTask<ToolVerification> VerifyAsync(JsonObject args, ToolResult result, ToolContext ctx, CancellationToken ct)
@@ -176,7 +179,7 @@ public sealed class PreviewTempCleanupTool(FileToolServices s) : ToolBase
         var summary = TempCleaner.Summary(m);
         var drive = s.Drives.Get(DriveLetterOf(temp));
         if (drive is not null) summary["driveFreeBytes"] = drive.AvailableToUserBytes;
-        return ValueTask.FromResult(ToolResult.Ok(summary, $"{m.Items.Count} temporary file(s), about {Bytes.Format(m.EligibleBytes)}, can be removed.", true));
+        return ValueTask.FromResult(ToolResult.Ok(summary, m.Items.Count == 0 ? "Your temp folder is already clean." : $"I found {m.Items.Count} old temporary files, {Bytes.Spoken(m.EligibleBytes)} in total.", true));
     }
 
     internal static string DriveLetterOf(string path) => OperatingSystem.IsWindows() && path.Length > 1 && path[1] == ':' ? path[..1] : "C";
@@ -231,9 +234,9 @@ public sealed class ApplyTempCleanupTool(FileToolServices s) : ToolBase
         };
         var delta = before.HasValue && after.HasValue ? after.Value - before.Value : (long?)null;
         var msg = recycle
-            ? $"Moved {r.Removed} file(s) to the Recycle Bin. Free space changes only after you empty it."
-            : $"Deleted {r.Removed} file(s). Measured free space change: {(delta.HasValue ? Bytes.Format(delta.Value) : "unknown")} (other apps can also change disk usage).";
-        if (r.Skipped > 0) msg += $" {r.Skipped} skipped (in use or changed).";
+            ? $"I moved {r.Removed} temp files to the Recycle Bin. You'll get the space back once you empty it."
+            : delta is > 0 ? $"All done — I cleared {r.Removed} temp files and freed up {Bytes.Spoken(delta.Value)}." : $"I cleared {r.Removed} temp files.";
+        if (r.Skipped > 0) msg += $" {r.Skipped} were in use, so I left them.";
         var outcome = r.Removed == 0 ? ToolOutcome.Failure : r.Skipped > 0 ? ToolOutcome.Partial : ToolOutcome.Success;
         return ValueTask.FromResult(new ToolResult(outcome, state, null, msg, false, false, [], null, TimeSpan.Zero));
     }
