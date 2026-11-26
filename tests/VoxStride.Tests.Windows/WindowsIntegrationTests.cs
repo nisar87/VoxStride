@@ -53,7 +53,7 @@ public sealed class WindowsIntegrationTests
         Assert.Equal("Calculator", c.Resolve("the calculator app").App?.DisplayName);
         Assert.Null(c.Resolve("cmd").App);
         Assert.Null(c.Resolve("powershell").App);
-        Assert.DoesNotContain(c.Snapshot(), a => a.LaunchTarget.EndsWith("cmd.exe", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(c.Snapshot(), a => Path.GetFileName(a.LaunchTarget) is var f && (f.Equals("cmd.exe", StringComparison.OrdinalIgnoreCase) || f.Equals("powershell.exe", StringComparison.OrdinalIgnoreCase) || f.Equals("pwsh.exe", StringComparison.OrdinalIgnoreCase)));
     }
 
     [Fact]
