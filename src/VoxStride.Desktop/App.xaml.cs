@@ -101,6 +101,7 @@ public partial class App : Application
         _vm.State = s;
         ApplyOverlayVisibility();
         if (s == AgentState.Listening) { _vm.FinalTranscript = ""; _vm.InterimTranscript = ""; _vm.Status = "Speak naturally — pauses are fine. Say \"VoxStride, execute\" or press Proceed when done."; }
+        Host?.SetConversationIdle(s is AgentState.Standby or AgentState.Muted);
         if (s == AgentState.Standby && Host is not null && !_muted) await Host.StartWakeAsync();
         if (s is AgentState.Listening) await (Host?.StopWakeAsync() ?? Task.CompletedTask);
     }

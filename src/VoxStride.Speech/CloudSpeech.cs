@@ -9,7 +9,10 @@ namespace VoxStride.Speech;
 /// <summary>Minimal WASAPI-compatible microphone capture through winmm waveIn (16 kHz, mono, 16-bit). No extra dependencies.</summary>
 public sealed class WaveInRecorder : IDisposable
 {
-    private const int WAVE_MAPPER = -1, CALLBACK_EVENT = 0x50000, WHDR_DONE = 1, BufferMs = 50, BufferCount = 8;
+    private const int CALLBACK_EVENT = 0x50000, WHDR_DONE = 1, BufferMs = 50, BufferCount = 8;
+    private const int WAVE_MAPPER = -1;
+    // WAVE_MAPPER is ((UINT)-1) passed as UINT_PTR: on x64 that is 0x00000000FFFFFFFF, not a sign-extended -1.
+    private static nint DeviceArg(int id) => id < 0 ? unchecked((nint)0xFFFFFFFFu) : id;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WAVEFORMATEX { public ushort wFormatTag, nChannels; public uint nSamplesPerSec, nAvgBytesPerSec; public ushort nBlockAlign, wBitsPerSample, cbSize; }
@@ -17,7 +20,7 @@ public sealed class WaveInRecorder : IDisposable
     [StructLayout(LayoutKind.Sequential)]
     private struct WAVEHDR { public nint lpData; public uint dwBufferLength, dwBytesRecorded; public nint dwUser; public uint dwFlags, dwLoops; public nint lpNext, reserved; }
 
-    [DllImport("winmm.dll")] private static extern int waveInOpen(out nint h, int device, ref WAVEFORMATEX fmt, nint callback, nint instance, int flags);
+    [DllImport("winmm.dll")] private static extern int waveInOpen(out nint h, nint device, ref WAVEFORMATEX fmt, nint callback, nint instance, int flags);
     [DllImport("winmm.dll")] private static extern int waveInPrepareHeader(nint h, nint hdr, int size);
     [DllImport("winmm.dll")] private static extern int waveInUnprepareHeader(nint h, nint hdr, int size);
     [DllImport("winmm.dll")] private static extern int waveInAddBuffer(nint h, nint hdr, int size);
@@ -71,6 +74,37 @@ public sealed class WaveInRecorder : IDisposable
 
     public static bool HasMicrophone() => waveInGetNumDevs() > 0;
 
+    /// <summary>Listens to every microphone at once for a moment and returns each device's peak level (for diagnosing a silent mic).</summary>
+    public static IReadOnlyList<(string Name, double Peak)> ProbeAll(TimeSpan duration)
+    {
+        var names = Devices();
+        var recs = new List<WaveInRecorder>();
+        for (var i = 0; i < names.Count; i++)
+        {
+            var r = new WaveInRecorder(i);
+            try { r.Start(); recs.Add(r); } catch (Exception) { r.Dispose(); }
+        }
+        Thread.Sleep(duration);
+        var result = recs.Select(r => (names[r.DeviceId], r.PeakSinceStart)).ToList();
+        foreach (var r in recs) r.Dispose();
+        return result;
+    }
+
+    /// <summary>Builds a helpful message when the active microphone is silent, naming any device that does hear sound.</summary>
+    public static string SilenceAdvice(int activeDevice)
+    {
+        var active = activeDevice >= 0 && activeDevice < Devices().Count ? Devices()[activeDevice] : "the Windows default microphone";
+        try
+        {
+            var probe = ProbeAll(TimeSpan.FromMilliseconds(1500));
+            var alive = probe.Where(p => p.Peak >= 30).OrderByDescending(p => p.Peak).Select(p => p.Name).ToList();
+            if (alive.Count > 0)
+                return $"I can't hear anything from {active}, but I do hear sound from \"{alive[0]}\". Choose it under Voice › Microphone, or make it your default input in Windows Sound settings";
+        }
+        catch (Exception) { }
+        return $"I can't hear anything from {active}. Check it isn't muted or switched off, and that Windows Settings › Privacy › Microphone allows desktop apps";
+    }
+
     public void Start()
     {
         if (_running) return;
@@ -78,7 +112,7 @@ public sealed class WaveInRecorder : IDisposable
         var fmt = new WAVEFORMATEX { wFormatTag = 1, nChannels = 1, nSamplesPerSec = (uint)SampleRate, wBitsPerSample = 16, nBlockAlign = 2, nAvgBytesPerSec = (uint)SampleRate * 2 };
         _signal = new AutoResetEvent(false);
         PeakSinceStart = 0;
-        var rc = waveInOpen(out _handle, DeviceId, ref fmt, _signal.SafeWaitHandle.DangerousGetHandle(), 0, CALLBACK_EVENT);
+        var rc = waveInOpen(out _handle, DeviceArg(DeviceId), ref fmt, _signal.SafeWaitHandle.DangerousGetHandle(), 0, CALLBACK_EVENT);
         if (rc != 0) throw new InvalidOperationException($"Could not open the microphone (code {rc}). Check Windows microphone privacy settings.");
         var size = Marshal.SizeOf<WAVEHDR>();
         var bytes = SampleRate * 2 * BufferMs / 1000;
@@ -220,7 +254,7 @@ public sealed class CloudSpeechRecognizer : ISpeechRecognizer
         _silenceTimer = new Timer(_ =>
         {
             if (_segmenter is not null && _mic.PeakSinceStart < 30)
-                Error?.Invoke("I can't hear anything from your microphone. Choose the right microphone in Voice settings, check it isn't muted, and make sure Windows Settings › Privacy › Microphone allows desktop apps");
+                Error?.Invoke(WaveInRecorder.SilenceAdvice(_mic.DeviceId));
         }, null, TimeSpan.FromSeconds(6), Timeout.InfiniteTimeSpan);
         return Task.CompletedTask;
     }

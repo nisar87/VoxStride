@@ -217,6 +217,7 @@
                         </StackPanel>
                     </Border>
                     <CheckBox x:Name="WakeBox" Content="Listen for &quot;Hey VoxStride&quot; (local, on this PC)" Margin="0,4" />
+                    <CheckBox x:Name="YieldBox" Content="Release the microphone while Teams, Zoom or another app is using it" Margin="0,4" />
                     <CheckBox x:Name="PlainProceedBox" Content="Also accept a standalone &quot;Proceed&quot; to finish (less strict)" Margin="0,4" />
                     <CheckBox x:Name="SpeakBox" Content="Speak results aloud" Margin="0,4" />
                     <CheckBox x:Name="CuesBox" Content="Play short sound cues" Margin="0,4" />

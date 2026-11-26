@@ -41,6 +41,8 @@ public sealed class AppSettings
     public bool SpeakResults { get; set; } = true;
     public bool AudioCues { get; set; } = true;
     public bool WakeWordEnabled { get; set; } = true;
+    /// <summary>Release the microphone (stop wake-word listening) while Teams, Zoom or any other app is using it.</summary>
+    public bool YieldMicToOtherApps { get; set; } = true;
     public bool AllowPlainProceed { get; set; }
     public int InactivityReminderSeconds { get; set; } = 30;
     public int InactivityDiscardSeconds { get; set; } = 120;

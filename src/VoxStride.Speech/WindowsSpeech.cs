@@ -262,7 +262,7 @@ internal sealed class MicInput
             _timer = new Timer(_ =>
             {
                 if (_rec.PeakSinceStart < 30)
-                    Problem?.Invoke("I can't hear anything from your microphone. Choose the right microphone in Voice settings, check it isn't muted, and make sure Windows Settings › Privacy › Microphone allows desktop apps");
+                    Problem?.Invoke(WaveInRecorder.SilenceAdvice(_rec.DeviceId));
             }, null, TimeSpan.FromSeconds(6), Timeout.InfiniteTimeSpan);
     }
 

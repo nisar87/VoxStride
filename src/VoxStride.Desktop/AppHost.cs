@@ -208,12 +208,43 @@ public sealed class AppHost : IAsyncDisposable
         var unresolved = await Store.GetUnresolvedMovesAsync(ct);
         if (unresolved.Count > 0)
             Events.Publish(Guid.Empty, AgentState.Standby, "recovery", $"{unresolved.Count} file move(s) from an interrupted task could not be confirmed. They were not repeated. See History.", canCancel: false);
+        StartMicWatch();
         await StartWakeAsync();
     }
+
+    private Timer? _micWatch;
+    private string? _yieldedTo;
+    private bool _conversationIdle = true;
+
+    /// <summary>
+    /// Checks every 3 s whether another app is using the microphone. If so, VoxStride stops its background
+    /// "Hey VoxStride" listening so calls in Teams/Zoom are never affected, and resumes when the mic is free.
+    /// </summary>
+    private void StartMicWatch() => _micWatch = new Timer(async _ =>
+    {
+        if (!Settings.YieldMicToOtherApps) return;
+        var other = MicrophoneUsage.OtherAppInUse();
+        if (other is not null && _yieldedTo is null)
+        {
+            _yieldedTo = other;
+            await StopWakeAsync();
+            DiagnosticsLog.Write("mic-yield: " + other);
+            Events.Publish(Guid.Empty, AgentState.Standby, "wake-unavailable", $"{other} is using the microphone, so I've stopped listening for \"Hey VoxStride\" until it's done. Ctrl+Alt+V still works.", canCancel: false);
+        }
+        else if (other is null && _yieldedTo is not null)
+        {
+            DiagnosticsLog.Write("mic-resume");
+            _yieldedTo = null;
+            if (_conversationIdle) await StartWakeAsync();
+        }
+    }, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+
+    public void SetConversationIdle(bool idle) => _conversationIdle = idle;
 
     public async Task StartWakeAsync()
     {
         if (!Settings.WakeWordEnabled || !Settings.MicrophoneConsent || Recognizer is NullRecognizer) return;
+        if (_yieldedTo is not null) return; // another app is using the microphone
         try
         {
             Wake ??= CreateWake();
@@ -257,6 +288,7 @@ public sealed class AppHost : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _micWatch?.Dispose();
         await Runs.CancelActiveAsync("shutdown");
         await Conversation.DisposeAsync();
         if (Wake is not null) await Wake.DisposeAsync();

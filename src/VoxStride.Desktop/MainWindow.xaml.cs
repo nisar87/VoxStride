@@ -148,7 +148,7 @@ public partial class MainWindow : Window
         RunBudgetBox.Text = s.MaxTokensPerRun.ToString(CultureInfo.InvariantCulture);
         MaxStepsBox.Text = s.MaxSteps.ToString(CultureInfo.InvariantCulture);
 
-        WakeBox.IsChecked = s.WakeWordEnabled; PlainProceedBox.IsChecked = s.AllowPlainProceed; SpeakBox.IsChecked = s.SpeakResults;
+        WakeBox.IsChecked = s.WakeWordEnabled; YieldBox.IsChecked = s.YieldMicToOtherApps; PlainProceedBox.IsChecked = s.AllowPlainProceed; SpeakBox.IsChecked = s.SpeakResults;
         CuesBox.IsChecked = s.AudioCues; OverlayBox.IsChecked = s.ShowOverlay;
         var cultures = WinRtSpeechRecognizer.Languages().Select(l => l.Tag).Concat(SpeechEnvironment.RecognizerCultures()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         CultureBox.ItemsSource = cultures.Count > 0 ? cultures : new List<string> { s.SpeechCulture };
@@ -279,7 +279,7 @@ public partial class MainWindow : Window
     {
         var s = _app.Settings;
         var wakeChanged = s.WakeWordEnabled != (WakeBox.IsChecked == true);
-        s.WakeWordEnabled = WakeBox.IsChecked == true; s.AllowPlainProceed = PlainProceedBox.IsChecked == true;
+        s.WakeWordEnabled = WakeBox.IsChecked == true; s.YieldMicToOtherApps = YieldBox.IsChecked == true; s.AllowPlainProceed = PlainProceedBox.IsChecked == true;
         s.SpeakResults = SpeakBox.IsChecked == true; s.AudioCues = CuesBox.IsChecked == true; s.ShowOverlay = OverlayBox.IsChecked == true;
         if (VoiceBox.SelectedItem is string v) s.Voice = v;
         var engineBefore = (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.MicrophoneName, s.SpeechCulture);
