@@ -76,14 +76,14 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer
                     _engine.LoadGrammar(g);
                 }
                 _engine.SpeechDetected += (_, e) => { lock (_gate) { _segment++; _revision = 0; _segmentStartMs = (long)e.AudioPosition.TotalMilliseconds; } };
-                _engine.SpeechHypothesized += (_, e) => Emit(e.Result.Text, isFinal: false, e.Result.Confidence, e.Result.Audio?.AudioPosition);
-                _engine.SpeechRecognized += (_, e) => Emit(e.Result.Text, isFinal: true, e.Result.Confidence, e.Result.Audio?.AudioPosition);
+                _engine.SpeechHypothesized += (_, e) => Emit(e.Result.Text, isFinal: false, e.Result.Confidence, e.Result.Audio);
+                _engine.SpeechRecognized += (_, e) => Emit(e.Result.Text, isFinal: true, e.Result.Confidence, e.Result.Audio);
                 _engine.SpeechRecognitionRejected += (_, e) =>
                 {
                     // Rejected audio: finalize the segment with its best guess at low confidence so pending interims don't block;
                     // control detection treats low confidence as uncertain and never commits on it.
                     var alt = e.Result.Alternates.FirstOrDefault();
-                    Emit(alt?.Text ?? "", isFinal: true, alt?.Confidence ?? 0, e.Result.Audio?.AudioPosition);
+                    Emit(alt?.Text ?? "", isFinal: true, alt?.Confidence ?? 0, e.Result.Audio);
                 };
                 _engine.AudioSignalProblemOccurred += (_, e) =>
                 {

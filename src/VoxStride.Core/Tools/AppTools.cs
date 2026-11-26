@@ -132,5 +132,5 @@ public sealed class EditorWriteTool(IEditorAdapter editor, IAppCatalog catalog) 
         return ValueTask.FromResult(new ToolVerification(ok, ok ? ToolOutcome.Success : ToolOutcome.Partial, ok ? null : "Inserted text could not be verified by read-back."));
     }
 
-    internal static string Normalize(string s) => s.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').TrimEnd();
+    public static string Normalize(string s) => s.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').TrimEnd();
 }
