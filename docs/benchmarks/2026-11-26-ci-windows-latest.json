@@ -1,0 +1,23 @@
+{
+  "source": "GitHub Actions run 45760942621 (windows-latest), commit f53ddf6",
+  "caseIds": ["INST-01", "SMOKE-01", "L01"],
+  "environment": { "os": "Windows Server (GitHub-hosted windows-latest)", "hardware": "GitHub-hosted runner (shared vCPU)", "network": "not used", "provider": "none", "speechEngine": "disabled (headless)" },
+  "installer": { "silentInstallSeconds": 12, "perUser": true, "adminRequired": false, "uninstallClean": true, "dataRemovedOnSilentUninstall": true, "signed": false },
+  "smokeFromInstalledExe": {
+    "hostStartupMs": 288.3,
+    "workingSetMbHeadless": 70.9,
+    "appCatalogEntries": 116,
+    "notepadResolved": true,
+    "commands": [
+      { "text": "how much space is left on C", "route": "direct", "ms": 41.5, "verified": true },
+      { "text": "list my drives", "route": "direct", "ms": 14.8, "verified": true },
+      { "text": "write a poem about rain", "route": "cloud (no provider configured)", "ms": 4.7, "expected": "actionable no-provider message" }
+    ]
+  },
+  "tests": { "windows": { "core": 160, "persistence": 5, "windowsIntegration": 14, "failed": 0 }, "linux": { "core": 160, "persistence": 5, "failed": 0 } },
+  "notes": [
+    "Headless working set excludes WPF UI and speech engines; interactive idle CPU/memory must be measured on a physical PC (target < 2% CPU, < 180 MB).",
+    "Direct-path timings are wall-clock from commit to verified result on a shared CI runner; L01 asserts p95 < 500 ms over 100 runs in-process."
+  ],
+  "status": "passed"
+}
