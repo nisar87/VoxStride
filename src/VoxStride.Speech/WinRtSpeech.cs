@@ -150,9 +150,18 @@ public sealed class WinRtSpeechRecognizer : ISpeechRecognizer
 }
 
 /// <summary>Uses the preferred recognizer, and falls back to a second one (once, with a notice) if it can't start.</summary>
-public sealed class FallbackSpeechRecognizer(ISpeechRecognizer primary, ISpeechRecognizer fallback) : ISpeechRecognizer
+public sealed class FallbackSpeechRecognizer : ISpeechRecognizer
 {
-    private ISpeechRecognizer _active = primary;
+    private readonly ISpeechRecognizer primary;
+    private readonly ISpeechRecognizer fallback;
+    private ISpeechRecognizer _active;
+
+    public FallbackSpeechRecognizer(ISpeechRecognizer primaryRecognizer, ISpeechRecognizer fallbackRecognizer)
+    {
+        primary = primaryRecognizer;
+        fallback = fallbackRecognizer;
+        _active = primaryRecognizer;
+    }
     private bool _fellBack;
 
     public string Name => _active.Name;
