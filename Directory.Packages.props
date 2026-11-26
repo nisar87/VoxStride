@@ -1,11 +1,13 @@
 <Project>
   <PropertyGroup>
-    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.0" />
     <PackageVersion Include="System.Speech" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Playwright" Version="1.65.1" />
+    <!-- Security pin: GHSA-2m69-gcr7-jv3q (CVE-2025-6965) affects SQLitePCLRaw.lib.e_sqlite3 <= 2.1.11 pulled by Microsoft.Data.Sqlite 10.0.0. -->
+    <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.13" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
