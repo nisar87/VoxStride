@@ -24,6 +24,20 @@ public sealed partial class WindowsAppCatalog : IAppCatalog
         "mshta.exe", "rundll32.exe", "bash.exe", "wsl.exe", "taskmgr.exe", "msconfig.exe", "gpedit.msc", "control.exe", "diskpart.exe", "format.com",
     };
 
+    private static readonly HashSet<string> BlockedNames = new(BlockedExecutables.Select(Path.GetFileNameWithoutExtension).OfType<string>(), StringComparer.OrdinalIgnoreCase)
+    { "command prompt", "terminal", "windows terminal", "windows powershell", "registry editor", "task manager" };
+    private static readonly HashSet<string> BlockedExtensions = new(StringComparer.OrdinalIgnoreCase) { ".bat", ".cmd", ".ps1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".msc", ".hta", ".scr", ".com" };
+
+    /// <summary>Shells, script hosts and admin consoles are never launchable, whatever their shortcut is called.</summary>
+    internal static bool IsBlocked(string name, string target, IEnumerable<string> aliases)
+    {
+        if (BlockedExecutables.Contains(Path.GetFileName(target)) || BlockedExtensions.Contains(Path.GetExtension(target))) return true;
+        var lower = name.ToLowerInvariant();
+        if (BlockedNames.Contains(lower) || lower.Contains("prompt", StringComparison.Ordinal) || lower.Contains("powershell", StringComparison.Ordinal) || lower.Contains("shell", StringComparison.Ordinal) && lower.Contains("command", StringComparison.Ordinal))
+            return true;
+        return aliases.Any(a => BlockedNames.Contains(a));
+    }
+
     private static readonly string[] NoiseNames = ["uninstall", "readme", "read me", "help", "website", "documentation", "license", "release notes", "changelog", "manual", "support"];
 
     public Task BuildAsync(CancellationToken ct = default) => Task.Run(() =>
@@ -34,10 +48,9 @@ public sealed partial class WindowsAppCatalog : IAppCatalog
             if (string.IsNullOrWhiteSpace(name)) return;
             var lower = name.ToLowerInvariant();
             if (NoiseNames.Any(n => lower.Contains(n, StringComparison.Ordinal))) return;
-            var exe = Path.GetFileName(target);
-            if (BlockedExecutables.Contains(exe)) return;
             var al = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { lower, Simplify(lower) };
             foreach (var a in aliases) al.Add(a.ToLowerInvariant());
+            if (IsBlocked(name, target, al)) return;
             list.Add(new AppEntry(source + ":" + target.ToLowerInvariant(), name, target, al.Where(a => a.Length > 0).ToList(), source));
         }
 
@@ -57,8 +70,8 @@ public sealed partial class WindowsAppCatalog : IAppCatalog
             {
                 ct.ThrowIfCancellationRequested();
                 var target = ShellLink.ResolveTarget(lnk);
-                if (target is not null && BlockedExecutables.Contains(Path.GetFileName(target))) continue;
                 var name = Path.GetFileNameWithoutExtension(lnk);
+                if (target is not null && IsBlocked(name, target, [])) continue;
                 Add(name, lnk, "startmenu", target is null ? [] : [Path.GetFileNameWithoutExtension(target)]);
             }
         }
@@ -100,6 +113,7 @@ public sealed partial class WindowsAppCatalog : IAppCatalog
         n = Regex.Replace(n, @"\s+(app|application|program)$", "");
         if (n.Length == 0) return new AppResolution(null, []);
         if (n is "notepad plus plus" or "notepad plus" or "notepad ++") n = "notepad++";
+        if (BlockedNames.Contains(n) || BlockedNames.Contains(n.Replace(".exe", "", StringComparison.OrdinalIgnoreCase))) return new AppResolution(null, []);
 
         var exact = apps.Where(a => a.Aliases.Contains(n, StringComparer.OrdinalIgnoreCase)).ToList();
         if (exact.Count == 1) return new AppResolution(exact[0], exact);

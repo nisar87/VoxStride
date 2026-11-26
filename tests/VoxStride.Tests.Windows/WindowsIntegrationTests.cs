@@ -72,6 +72,19 @@ public sealed class WindowsIntegrationTests
         Assert.Null(WindowsAppCatalog.ResolveIn(apps, "excel").App);
     }
 
+    [Theory]
+    [InlineData("Anaconda Prompt", @"C:\Windows\System32\cmd.exe")]
+    [InlineData("Developer Command Prompt for VS", @"C:\tools\launch.bat")]
+    [InlineData("Windows PowerShell", @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")]
+    [InlineData("Some Tool", @"C:\tools\run.ps1")]
+    [InlineData("Computer Management", @"C:\Windows\System32\compmgmt.msc")]
+    public void ShellsScriptsAndConsolesAreBlocked(string name, string target) =>
+        Assert.True(WindowsAppCatalog.IsBlocked(name, target, []));
+
+    [Fact]
+    public void OrdinaryAppsAreNotBlocked() =>
+        Assert.False(WindowsAppCatalog.IsBlocked("Notepad++", @"C:\Program Files\Notepad++\notepad++.exe", ["notepad++"]));
+
     /// <summary>U01/U02: writes into a NEW Notepad window by exact HWND and verifies by read-back; no keystrokes are injected.</summary>
     [Fact]
     public async Task NotepadWriteIsVerifiedByReadBack()
