@@ -47,6 +47,7 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer
     private long _sequence;
     private long _segmentStartMs;
     private TaskCompletionSource? _stopped;
+    private bool _running;
     private readonly Lock _gate = new();
 
     public WindowsSpeechRecognizer(string culture, IReadOnlyList<string> controlPhrases)
@@ -92,13 +93,16 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer
                 _engine.RecognizeCompleted += (_, e) =>
                 {
                     if (e.Error is not null) Error?.Invoke(e.Error.Message);
+                    lock (_gate) _running = false;
                     _stopped?.TrySetResult();
                 };
             }
+            if (_running) return Task.CompletedTask; // already capturing: only the session id changes
             try { _engine.SetInputToDefaultAudioDevice(); }
             catch (Exception ex) when (ex is InvalidOperationException or COMException) { throw new InvalidOperationException("No microphone is available (" + ex.Message + ")."); }
             _stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _engine.RecognizeAsync(RecognizeMode.Multiple);
+            _running = true;
         }
         return Task.CompletedTask;
     }
@@ -121,15 +125,20 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer
         Task? wait;
         lock (_gate)
         {
-            if (_engine is null || _stopped is null) return;
+            if (_engine is null || _stopped is null || !_running) return;
             wait = _stopped.Task;
             if (flushTimeout <= TimeSpan.Zero) _engine.RecognizeAsyncCancel();
             else _engine.RecognizeAsyncStop(); // completes the current phrase, then stops
         }
         await Task.WhenAny(wait, Task.Delay(flushTimeout <= TimeSpan.Zero ? TimeSpan.FromMilliseconds(300) : flushTimeout, ct)).ConfigureAwait(false);
+        if (!wait.IsCompleted)
+        {
+            lock (_gate) _engine?.RecognizeAsyncCancel();
+            await Task.WhenAny(wait, Task.Delay(500, ct)).ConfigureAwait(false);
+        }
         lock (_gate)
         {
-            if (!wait.IsCompleted) _engine?.RecognizeAsyncCancel();
+            _running = !wait.IsCompleted && _running;
             try { _engine?.SetInputToNull(); } catch (Exception) { } // release the microphone
         }
     }
@@ -150,6 +159,7 @@ public sealed class WindowsWakeWordDetector : IWakeWordDetector
 {
     private readonly string _culture;
     private SpeechRecognitionEngine? _engine;
+    private bool _running;
     private readonly Lock _gate = new();
     public float MinConfidence { get; set; } = 0.72f;
     public string Phrase => "Hey VoxStride";
@@ -184,8 +194,10 @@ public sealed class WindowsWakeWordDetector : IWakeWordDetector
                     if (words.Count > wakeIdx) TrailingText?.Invoke(string.Join(' ', words.Skip(wakeIdx).Select(w => w.Text)));
                 };
             }
+            if (_running) return Task.CompletedTask;
             _engine.SetInputToDefaultAudioDevice();
             _engine.RecognizeAsync(RecognizeMode.Multiple);
+            _running = true;
         }
         return Task.CompletedTask;
     }
@@ -194,7 +206,9 @@ public sealed class WindowsWakeWordDetector : IWakeWordDetector
     {
         lock (_gate)
         {
+            if (!_running) return Task.CompletedTask;
             try { _engine?.RecognizeAsyncCancel(); _engine?.SetInputToNull(); } catch (Exception) { }
+            _running = false;
         }
         return Task.CompletedTask;
     }
