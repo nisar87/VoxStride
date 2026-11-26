@@ -101,7 +101,7 @@ public partial class MainWindow : Window
     private void Proceed_Click(object sender, RoutedEventArgs e) => _app.Host?.Conversation.PressProceed();
 
     // ---------- History ----------
-    private sealed record HistoryRow(string Badge, string When, string Meta, string Title, string Summary, string Steps);
+    public sealed record HistoryRow(string Badge, string When, string Meta, string Title, string Summary, string Steps);
 
     private async Task RefreshHistoryAsync()
     {
@@ -150,7 +150,7 @@ public partial class MainWindow : Window
         WakeBox.IsChecked = s.WakeWordEnabled; PlainProceedBox.IsChecked = s.AllowPlainProceed; SpeakBox.IsChecked = s.SpeakResults;
         CuesBox.IsChecked = s.AudioCues; OverlayBox.IsChecked = s.ShowOverlay;
         var cultures = SpeechEnvironment.RecognizerCultures();
-        CultureBox.ItemsSource = cultures.Count > 0 ? cultures : [s.SpeechCulture];
+        CultureBox.ItemsSource = cultures.Count > 0 ? cultures : new List<string> { s.SpeechCulture };
         CultureBox.SelectedItem = cultures.Contains(s.SpeechCulture) ? s.SpeechCulture : cultures.FirstOrDefault();
         var voices = SpeechEnvironment.Voices();
         VoiceBox.ItemsSource = voices;

@@ -72,10 +72,9 @@ public sealed class WpfApproval(Dispatcher dispatcher, Func<string, string, Task
 
     public async Task<Approval?> RequestAsync(ApprovalRequest request, CancellationToken ct)
     {
-        ApprovalWindow? window = null;
         var result = await dispatcher.InvokeAsync(() =>
         {
-            window = new ApprovalWindow(request, Timeout);
+            var window = new ApprovalWindow(request, Timeout);
             using var reg = ct.Register(() => dispatcher.BeginInvoke(() => { try { window.Close(); } catch (InvalidOperationException) { } }));
             window.ShowDialog();
             return (window.Result, window.RememberRule);

@@ -172,7 +172,7 @@ public sealed class AppHost : IAsyncDisposable
         var w = new WindowsWakeWordDetector(Settings.SpeechCulture);
         string? trailing = null;
         w.TrailingText += t => trailing = t;
-        w.WakeDetected += _ =>
+        w.WakeDetected += detectedAt =>
         {
             // TrailingText is raised right after WakeDetected for the same utterance; defer one tick to collect it.
             _ = Task.Run(async () =>
