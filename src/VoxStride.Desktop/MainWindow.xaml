@@ -192,9 +192,10 @@
                                 <TextBlock Text="Engine" VerticalAlignment="Center" Width="90" />
                                 <ComboBox x:Name="EngineBox" Width="260">
                                     <ComboBoxItem Content="Automatic (best available)" Tag="Auto" />
-                                    <ComboBoxItem Content="OpenAI (gpt-transcribe)" Tag="OpenAI" />
-                                    <ComboBoxItem Content="Gemini" Tag="Gemini" />
-                                    <ComboBoxItem Content="Windows (offline, English only)" Tag="Windows" />
+                                    <ComboBoxItem Content="Windows online dictation (free, no key)" Tag="WindowsOnline" />
+                                    <ComboBoxItem Content="OpenAI (gpt-transcribe, needs key)" Tag="OpenAI" />
+                                    <ComboBoxItem Content="Gemini (needs key)" Tag="Gemini" />
+                                    <ComboBoxItem Content="Windows basic offline (least accurate)" Tag="Windows" />
                                 </ComboBox>
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
@@ -220,7 +221,7 @@
                     <CheckBox x:Name="SpeakBox" Content="Speak results aloud" Margin="0,4" />
                     <CheckBox x:Name="CuesBox" Content="Play short sound cues" Margin="0,4" />
                     <CheckBox x:Name="OverlayBox" Content="Show the floating assistant" Margin="0,4" />
-                    <TextBlock Text="Recognition language" FontWeight="SemiBold" Margin="0,14,0,4" />
+                    <TextBlock Text="Recognition language (try en-IN for South Asian English)" FontWeight="SemiBold" Margin="0,14,0,4" />
                     <ComboBox x:Name="CultureBox" Width="260" HorizontalAlignment="Left" />
                     <TextBlock Text="Offline Windows voice (used when the natural voice isn't available)" FontWeight="SemiBold" Margin="0,14,0,4" />
                     <ComboBox x:Name="VoiceBox" Width="360" HorizontalAlignment="Left" />

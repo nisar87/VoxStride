@@ -173,8 +173,22 @@ public sealed class AppHost : IAsyncDisposable
             SpeechEngineLabel = cloud.Name;
             return new CloudSpeechRecognizer(cloud, Settings.MicSensitivity, device);
         }
+        var offline = new WindowsSpeechRecognizer(Settings.SpeechCulture, ["VoxStride execute", "VoxStride proceed", "assistant proceed", "execute now", "cancel", "never mind", "scratch that", "undo last sentence", "stop listening"], device);
+        if (Settings.SpeechEngine != SpeechEngine.Windows && WinRtSpeechRecognizer.IsAvailable())
+        {
+            SpeechEngineLabel = "Windows online dictation (" + Settings.SpeechCulture + ")";
+            MicrophoneLabel = "Windows default microphone (set in Windows Sound settings)";
+            var fb = new FallbackSpeechRecognizer(new WinRtSpeechRecognizer(Settings.SpeechCulture), offline);
+            fb.FellBack += reason =>
+            {
+                SpeechEngineLabel = "Windows (offline)";
+                DiagnosticsLog.Write("speech-fallback: " + reason);
+                Events.Publish(Guid.Empty, AgentState.Standby, "wake-unavailable", "Better Windows dictation couldn't start: " + reason + " Using the basic offline engine for now.", canCancel: false);
+            };
+            return fb;
+        }
         SpeechEngineLabel = "Windows (offline)";
-        return new WindowsSpeechRecognizer(Settings.SpeechCulture, ["VoxStride execute", "VoxStride proceed", "assistant proceed", "execute now", "cancel", "never mind", "scratch that", "undo last sentence", "stop listening"], device);
+        return offline;
     }
 
     private ICloudVoice? CreateCloudVoice()

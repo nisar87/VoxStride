@@ -150,7 +150,7 @@ public partial class MainWindow : Window
 
         WakeBox.IsChecked = s.WakeWordEnabled; PlainProceedBox.IsChecked = s.AllowPlainProceed; SpeakBox.IsChecked = s.SpeakResults;
         CuesBox.IsChecked = s.AudioCues; OverlayBox.IsChecked = s.ShowOverlay;
-        var cultures = SpeechEnvironment.RecognizerCultures();
+        var cultures = WinRtSpeechRecognizer.Languages().Select(l => l.Tag).Concat(SpeechEnvironment.RecognizerCultures()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         CultureBox.ItemsSource = cultures.Count > 0 ? cultures : new List<string> { s.SpeechCulture };
         CultureBox.SelectedItem = cultures.Contains(s.SpeechCulture) ? s.SpeechCulture : cultures.FirstOrDefault();
         var voices = SpeechEnvironment.Voices();
@@ -281,10 +281,10 @@ public partial class MainWindow : Window
         var wakeChanged = s.WakeWordEnabled != (WakeBox.IsChecked == true);
         s.WakeWordEnabled = WakeBox.IsChecked == true; s.AllowPlainProceed = PlainProceedBox.IsChecked == true;
         s.SpeakResults = SpeakBox.IsChecked == true; s.AudioCues = CuesBox.IsChecked == true; s.ShowOverlay = OverlayBox.IsChecked == true;
-        if (CultureBox.SelectedItem is string c) s.SpeechCulture = c;
         if (VoiceBox.SelectedItem is string v) s.Voice = v;
-        var engineBefore = (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.MicrophoneName);
+        var engineBefore = (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.MicrophoneName, s.SpeechCulture);
         s.MicrophoneName = MicBox.SelectedIndex <= 0 ? null : MicBox.SelectedItem as string;
+        if (CultureBox.SelectedItem is string c) s.SpeechCulture = c;
         s.CloudSpeechConsent = CloudSpeechBox.IsChecked == true;
         if (EngineBox.SelectedItem is ComboBoxItem { Tag: string tag }) s.SpeechEngine = Enum.Parse<SpeechEngine>(tag);
         s.MicSensitivity = SensitivitySlider.Value;
@@ -292,7 +292,7 @@ public partial class MainWindow : Window
         if (CloudVoiceBox.SelectedItem is string cv) s.CloudVoiceName = cv;
         s.Save();
         _app.Host!.RefreshVoice();
-        if (engineBefore != (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.MicrophoneName))
+        if (engineBefore != (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.MicrophoneName, s.SpeechCulture))
         {
             if (MessageBox.Show(this, "The new speech settings take effect after VoxStride restarts. Restart now?", "VoxStride", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             { _app.RestartApp(); return; }

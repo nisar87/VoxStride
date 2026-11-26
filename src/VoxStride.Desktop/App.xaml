@@ -29,6 +29,13 @@
                 <Setter Property="Padding" Value="16,6" />
                 <Setter Property="MinHeight" Value="32" />
             </Style>
+            <Style x:Key="OverlayButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                <Setter Property="Background" Value="#FF3A3E4F" />
+                <Setter Property="Foreground" Value="#F5F7FA" />
+                <Setter Property="BorderBrush" Value="#FF4B5063" />
+                <Setter Property="Padding" Value="14,6" />
+                <Setter Property="MinHeight" Value="32" />
+            </Style>
             <Style x:Key="PlainButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
                 <Setter Property="Padding" Value="14,6" />
                 <Setter Property="MinHeight" Value="32" />
