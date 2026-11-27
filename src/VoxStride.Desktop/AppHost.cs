@@ -101,7 +101,8 @@ public sealed class AppHost : IAsyncDisposable
     public ProviderSelector Providers { get; }
     public RunCoordinator Runs { get; }
     public ConversationCoordinator Conversation { get; }
-    public ISpeechRecognizer Recognizer { get; }
+    public SwitchableRecognizer Recognizer { get; }
+    private readonly bool _speechEnabled;
     /// <summary>The one owner of the microphone; wake word, dictation and tests all take leases from it.</summary>
     public AudioHub Microphone { get; }
     public NaturalSpeechSynthesizer? Speech { get; }
@@ -177,17 +178,18 @@ public sealed class AppHost : IAsyncDisposable
         var control = new ControlPhraseDetector(new ControlPhraseOptions { AllowPlainProceed = settings.AllowPlainProceed });
         Microphone = new AudioHub(() => OpenMicrophone(Settings.MicrophoneName), m => Log.Info("mic", m));
         var label = "off";
-        Recognizer = enableSpeech ? CreateRecognizer(Microphone, out label) : new NullRecognizer();
+        _speechEnabled = enableSpeech;
+        Recognizer = new SwitchableRecognizer(enableSpeech ? CreateRecognizer(Microphone, out label) : new NullRecognizer(),
+            r => r is CloudSpeechRecognizer ? TimeSpan.FromSeconds(8) : TimeSpan.FromMilliseconds(1500));
         SpeechEngineLabel = label;
-        if (Recognizer is ISpeechDiagnostics diag)
-            diag.Hint += hint => Events.Publish(Guid.Empty, AgentState.Listening, "speech-hint", hint + ".", canCancel: true);
-        var cloudSpeech = Recognizer is CloudSpeechRecognizer;
+        Recognizer.Hint += hint => Events.Publish(Guid.Empty, AgentState.Listening, "speech-hint", hint + ".", canCancel: true);
+        Recognizer.Switched += name => Log.Info("speech", $"speech engine switched to {name}");
         Conversation = new ConversationCoordinator(Recognizer, Speech, Runs, control, new CoordinatorOptions
         {
             InactivityReminder = TimeSpan.FromSeconds(settings.InactivityReminderSeconds),
             InactivityDiscard = TimeSpan.FromSeconds(settings.InactivityDiscardSeconds),
             Language = settings.SpeechCulture,
-            FinalizeFlushTimeout = cloudSpeech ? TimeSpan.FromSeconds(8) : TimeSpan.FromMilliseconds(1500),
+            FinalizeFlushTimeout = TimeSpan.FromSeconds(8), // capped per engine by the switchable recognizer
             SelectedProvider = () => settings.ActiveProvider?.ToString(),
             NaturalTurnPause = settings.NaturalMode ? TimeSpan.FromSeconds(Math.Clamp(settings.NaturalPauseSeconds, 0.8, 5)) : null,
         }, time);
@@ -221,7 +223,7 @@ public sealed class AppHost : IAsyncDisposable
     }
 
     /// <summary>True when only the basic offline engine is available (no cloud key/consent).</summary>
-    public bool UsingBasicEngine => Recognizer is WindowsSpeechRecognizer;
+    public bool UsingBasicEngine => Recognizer.Current is WindowsSpeechRecognizer;
 
     /// <summary>
     /// Builds the speech recognizer on the given microphone: cloud speech (accurate with accents) when allowed,
@@ -237,6 +239,20 @@ public sealed class AppHost : IAsyncDisposable
         }
         label = "Windows offline (" + (SpeechEnvironment.PickRecognizer(Settings.SpeechCulture)?.Culture.Name ?? Settings.SpeechCulture) + ")";
         return new WindowsSpeechRecognizer(Settings.SpeechCulture, ControlPhrases, microphone);
+    }
+
+    /// <summary>
+    /// Re-picks the speech engine after a key or voice setting changed (e.g. a Gemini key was saved), without a
+    /// restart. If an instruction is being dictated, the new engine takes over when that listening session ends.
+    /// </summary>
+    public async Task RefreshSpeechEngineAsync(bool force = false)
+    {
+        if (!_speechEnabled) return;
+        var next = CreateRecognizer(Microphone, out var label);
+        if (!force && label == SpeechEngineLabel) { await next.DisposeAsync(); return; }
+        Log.Info("speech", $"speech engine change requested: {SpeechEngineLabel} -> {label}");
+        SpeechEngineLabel = label;
+        await Recognizer.ReplaceAsync(next);
     }
 
     public sealed record SpeechTestResult(string Engine, string Device, long Buffers, double Peak, string Heard, IReadOnlyList<string> Problems);
@@ -365,7 +381,7 @@ public sealed class AppHost : IAsyncDisposable
 
     public async Task StartWakeAsync()
     {
-        if (!Settings.WakeWordEnabled || !Settings.MicrophoneConsent || Recognizer is NullRecognizer) { Log.Debug("wake", $"wake not started (enabled={Settings.WakeWordEnabled}, micConsent={Settings.MicrophoneConsent}, speech={Recognizer is not NullRecognizer})"); return; }
+        if (!Settings.WakeWordEnabled || !Settings.MicrophoneConsent || Recognizer.Current is NullRecognizer) { Log.Debug("wake", $"wake not started (enabled={Settings.WakeWordEnabled}, micConsent={Settings.MicrophoneConsent}, speech={Recognizer.Current is not NullRecognizer})"); return; }
         if (_yieldedTo is not null) { Log.Debug("wake", $"wake not started: {_yieldedTo} is using the microphone"); return; } // another app is using the microphone
         try
         {

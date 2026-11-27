@@ -33,13 +33,6 @@ public static class SpeechEnvironment
     }
 }
 
-/// <summary>Optional diagnostics a recognizer can raise besides hard errors.</summary>
-public interface ISpeechDiagnostics
-{
-    /// <summary>A gentle, non-fatal hint (e.g. "I haven't heard any sound yet"). Never interrupts the instruction.</summary>
-    event Action<string>? Hint;
-}
-
 /// <summary>
 /// Local streaming dictation using the installed Windows speech recognizer (no network, no keys).
 /// Audio comes from the shared <see cref="AudioHub"/> through a <see cref="PcmPipeStream"/>, which fills every engine

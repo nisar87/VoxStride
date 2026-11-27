@@ -276,6 +276,7 @@ public partial class MainWindow : Window
                 if (_app.Settings.ActiveProvider is null && _app.Host!.Secrets.Load(ProviderSelector.SecretName(kind)) is { Length: > 0 }) _app.Settings.ActiveProvider = kind;
                 _app.Settings.Save();
                 _app.Host!.Providers.Invalidate();
+                _ = RefreshEngineAfterKeyAsync();
                 LoadSettingsIntoUi();
             };
             test.Click += async (_, _) =>
@@ -293,6 +294,7 @@ public partial class MainWindow : Window
                 if (_app.Settings.ActiveProvider == kind) _app.Settings.ActiveProvider = null;
                 _app.Settings.Save();
                 _app.Host!.Providers.Invalidate();
+                _ = RefreshEngineAfterKeyAsync();
                 LoadSettingsIntoUi();
             };
             ProviderCards.Items.Add(new Border { Child = panel, Padding = new Thickness(14), Margin = new Thickness(0, 0, 0, 12), CornerRadius = new CornerRadius(10), Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(0x10, 0x80, 0x80, 0x80)) });
@@ -343,15 +345,33 @@ public partial class MainWindow : Window
         s.Save();
         _app.Host!.RefreshVoice();
         if (!string.Equals(micBefore, s.MicrophoneName, StringComparison.Ordinal)) _app.Host.MicrophoneChanged(); // applies immediately
-        if (engineBefore != (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.SpeechCulture, s.NaturalMode))
+        if (engineBefore.SpeechCulture != s.SpeechCulture || engineBefore.naturalBefore != s.NaturalMode)
         {
-            if (MessageBox.Show(this, "The new speech settings take effect after VoxStride restarts. Restart now?", "VoxStride", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            if (MessageBox.Show(this, "The new language or natural-mode setting takes effect after VoxStride restarts. Restart now?", "VoxStride", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             { _app.RestartApp(); return; }
+        }
+        else if (engineBefore != (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.SpeechCulture, s.NaturalMode))
+        {
+            await _app.Host.RefreshSpeechEngineAsync(force: true); // engine and sensitivity apply without a restart
+            _vm.AddActivity($"Speech engine: {_app.Host.SpeechEngineLabel}.");
         }
         if (_app.Host!.Speech is { } sp) { sp.Enabled = s.SpeakResults; sp.CuesEnabled = s.AudioCues; }
         if (wakeChanged) { if (s.WakeWordEnabled) await _app.Host.StartWakeAsync(); else await _app.Host.StopWakeAsync(); }
         _app.ApplyOverlayVisibility();
         _vm.AddActivity("Voice settings saved. Language, voice and finish-phrase changes apply after restart.");
+    }
+
+    /// <summary>A new OpenAI or Gemini key can enable cloud speech straight away; no restart needed.</summary>
+    private async Task RefreshEngineAfterKeyAsync()
+    {
+        try
+        {
+            var before = _app.Host!.SpeechEngineLabel;
+            await _app.Host.RefreshSpeechEngineAsync();
+            if (_app.Host.SpeechEngineLabel != before) _vm.AddActivity($"Speech engine is now {_app.Host.SpeechEngineLabel}.");
+            LoadSettingsIntoUi();
+        }
+        catch (Exception ex) { Log.Error("speech", "switching the speech engine failed", ex); }
     }
 
     private void TestVoice_Click(object sender, RoutedEventArgs e) =>

@@ -62,11 +62,13 @@ public sealed class CloudSpeechRecognizer : ISpeechRecognizer, ISpeechDiagnostic
             };
             segmenter.SpeechDiscarded += () =>
             {
+                _log?.Invoke($"speech-discarded too short to be speech (noise floor {segmenter.NoiseFloor:0})");
                 if (_openId is { } id) Raise(new TranscriptEvent(_session, id, Interlocked.Increment(ref _sequence), 2, true, "", 0, 0));
                 _openId = null;
             };
             segmenter.SegmentReady += seg =>
             {
+                _log?.Invoke($"speech-segment {seg.EndMs - seg.StartMs} ms rms={UtteranceSegmenter.Rms(seg.Pcm16):0} sent for transcription");
                 var id = _openId ?? "c-" + Interlocked.Increment(ref _counter);
                 _openId = null;
                 _queue?.Writer.TryWrite((seg, id, _session));

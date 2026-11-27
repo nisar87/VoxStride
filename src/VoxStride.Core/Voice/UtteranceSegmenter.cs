@@ -18,7 +18,7 @@ public sealed class UtteranceSegmenter(int sampleRate = 16000)
     public TimeSpan PreRoll { get; init; } = TimeSpan.FromMilliseconds(300);
     /// <summary>Speech threshold as a multiple of the adaptive noise floor.</summary>
     public double Sensitivity { get; init; } = 3.0;
-    public double MinRms { get; init; } = 250;
+    public double MinRms { get; init; } = 120;
 
     public event Action<long>? SpeechStarted;
     public event Action<AudioSegment>? SegmentReady;
@@ -34,7 +34,7 @@ public sealed class UtteranceSegmenter(int sampleRate = 16000)
     private long _framesSeen;
     private long _segmentStartFrame;
     private int _index;
-    private double _noiseFloor = 400;
+    private double _noiseFloor = 150;
 
     private int FrameBytes => SampleRate * 2 * (int)FrameLength.TotalMilliseconds / 1000;
     private int Frames(TimeSpan t) => (int)Math.Ceiling(t.TotalMilliseconds / FrameLength.TotalMilliseconds);

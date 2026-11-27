@@ -262,10 +262,25 @@ public sealed class AudioHubTests
     }
 
     [Fact]
+    public void QuietMicrophoneIsBoostedForEveryListenerButHealthUsesTheRealLevel()
+    {
+        FakeDevice? device = null;
+        using var hub = new AudioHub(() => device = new FakeDevice("mic"));
+        using var lease = hub.Acquire("dictation");
+        byte[] last = [];
+        lease.Data += b => last = b;
+        for (var i = 0; i < 20; i++) device!.Emit(3);
+        for (var i = 0; i < 60; i++) device!.Emit(300);
+        Assert.True(hub.Gain > 8, $"gain {hub.Gain}");
+        Assert.True(Math.Abs(BitConverter.ToInt16(last, 0)) > 2400);
+        Assert.True(lease.Peak < 400, $"peak {lease.Peak}"); // diagnostics report what the device really sent
+    }
+
+    [Fact]
     public void PrerollReplaysAudioSinceTheHandoverPoint()
     {
         FakeDevice? device = null;
-        using var hub = new AudioHub(() => device = new FakeDevice("mic"), prerollBytes: 16000);
+        using var hub = new AudioHub(() => device = new FakeDevice("mic"), prerollBytes: 16000) { AutoGainEnabled = false };
         using var wake = hub.Acquire("wake");
         device!.Emit(1000, 1600);
         var handover = hub.Position;                 // wake phrase detected here
@@ -333,4 +348,81 @@ public sealed class AudioHubTests
     [InlineData(10, 800, 500, MicHealth.Ok)]
     public void HealthDistinguishesNoAudioFromSilence(long buffers, double peak, int elapsedMs, MicHealth expected) =>
         Assert.Equal(expected, MicHealthCheck.Evaluate(buffers, peak, TimeSpan.FromMilliseconds(elapsedMs), TimeSpan.FromSeconds(6)));
+}
+
+public sealed class AutoGainTests
+{
+    private static byte[] Tone(int ms, short amplitude)
+    {
+        var n = 16 * ms;
+        var b = new byte[n * 2];
+        for (var i = 0; i < n; i++)
+        {
+            var s = (short)(Math.Sin(2 * Math.PI * 220 * i / 16000.0) * amplitude);
+            b[2 * i] = (byte)(s & 0xFF); b[2 * i + 1] = (byte)((s >> 8) & 0xFF);
+        }
+        return b;
+    }
+
+    private static IEnumerable<byte[]> Buffers(int count, int ms, short amplitude) => Enumerable.Range(0, count).Select(_ => Tone(ms, amplitude));
+
+    [Fact]
+    public void QuietSpeechIsRaisedTowardsTheTargetWithoutClipping()
+    {
+        // The owner's HyperX headset delivered speech peaking at RMS ~300 with a noise floor of ~2.
+        var g = new AutoGain();
+        foreach (var b in Buffers(40, 50, 3)) g.Process(b);           // quiet room
+        byte[] last = [];
+        foreach (var b in Buffers(60, 50, 420)) last = g.Process(b);   // quiet speech (RMS ~300)
+        Assert.True(g.Gain > 8, $"gain {g.Gain}");
+        Assert.True(UtteranceSegmenter.Rms(last) > 2400, $"rms {UtteranceSegmenter.Rms(last)}");
+        for (var i = 0; i + 1 < last.Length; i += 2) Assert.True(Math.Abs((short)(last[i] | (last[i + 1] << 8))) <= 32767);
+    }
+
+    [Fact]
+    public void LoudMicrophonesPassThroughUnchanged()
+    {
+        var g = new AutoGain();
+        foreach (var b in Buffers(20, 50, 3)) g.Process(b);
+        var loud = Tone(50, 12000);
+        for (var i = 0; i < 30; i++) g.Process(loud);
+        Assert.True(ReferenceEquals(loud, g.Process(loud)));
+        Assert.True(g.Gain < 1.02, $"gain {g.Gain}");
+    }
+
+    [Fact]
+    public void SilenceAloneNeverRaisesTheGain()
+    {
+        var g = new AutoGain();
+        foreach (var b in Buffers(200, 50, 5)) g.Process(b);
+        Assert.True(g.Gain < 1.02, $"gain {g.Gain}");
+    }
+
+    [Fact]
+    public void GainDropsImmediatelyWhenSpeechGetsLoud()
+    {
+        var g = new AutoGain();
+        foreach (var b in Buffers(20, 50, 3)) g.Process(b);
+        foreach (var b in Buffers(60, 50, 420)) g.Process(b);
+        var before = g.Gain;
+        var loud = g.Process(Tone(50, 20000));
+        Assert.True(g.Gain < before / 2, $"{before} -> {g.Gain}");
+        for (var i = 0; i + 1 < loud.Length; i += 2) Assert.True(Math.Abs((short)(loud[i] | (loud[i + 1] << 8))) <= 32767);
+    }
+
+    [Fact]
+    public void QuietBoostedSpeechIsSegmentedNotDiscarded()
+    {
+        var g = new AutoGain();
+        var seg = new UtteranceSegmenter();
+        var segments = 0; var discarded = 0;
+        seg.SegmentReady += _ => segments++;
+        seg.SpeechDiscarded += () => discarded++;
+        void Feed(int count, short amp) { foreach (var b in Buffers(count, 50, amp)) seg.Push(g.Process(b)); }
+        Feed(20, 3);     // 1 s quiet room
+        Feed(30, 420);   // 1.5 s of quiet speech: "hi, how are you"
+        Feed(25, 3);     // pause
+        Assert.Equal(1, segments);
+        Assert.Equal(0, discarded);
+    }
 }

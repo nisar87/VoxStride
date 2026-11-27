@@ -31,6 +31,7 @@ public sealed class AudioHub : IDisposable
     private AudioLease[] _leases = [];
     private bool _disposed;
     private readonly byte[] _history;
+    private readonly AutoGain _gain = new();
     private int _historyCount;
     private int _historyHead; // next write index
     private long _position;   // total bytes delivered since the hub was created
@@ -157,9 +158,16 @@ public sealed class AudioHub : IDisposable
         _log?.Invoke($"mic-close device=\"{device.Label}\" reason={reason}");
     }
 
-    private void OnData(byte[] data)
+    /// <summary>Boost quiet microphones in software (never touches Windows settings). On by default.</summary>
+    public bool AutoGainEnabled { get; init; } = true;
+
+    /// <summary>Current software gain applied to quiet microphones (1 = unchanged).</summary>
+    public double Gain => _gain.Gain;
+
+    private void OnData(byte[] raw)
     {
-        var rms = UtteranceSegmenter.Rms(data);
+        var rms = UtteranceSegmenter.Rms(raw); // health and peak are measured on what the device really sent
+        var data = AutoGainEnabled ? _gain.Process(raw) : raw;
         AudioLease[] leases;
         lock (_gate)
         {
@@ -233,7 +241,7 @@ public sealed class AudioHub : IDisposable
             var before = _leases.Length;
             _leases = [.. _leases.Where(l => !ReferenceEquals(l, lease))];
             if (_leases.Length == before) return;
-            _log?.Invoke($"mic-lease purpose={lease.Purpose} device=\"{lease.DeviceLabel}\" ms={(long)lease.Elapsed.TotalMilliseconds} buffers={lease.Buffers} peak={lease.Peak:0}");
+            _log?.Invoke($"mic-lease purpose={lease.Purpose} device=\"{lease.DeviceLabel}\" ms={(long)lease.Elapsed.TotalMilliseconds} buffers={lease.Buffers} peak={lease.Peak:0} gain={_gain.Gain:0.0}x noise={_gain.NoiseFloor:0} speech={_gain.SpeechLevel:0}");
             if (_leases.Length == 0) { Close("no listeners"); _nextRecoveryTick = 0; }
         }
     }

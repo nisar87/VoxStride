@@ -164,6 +164,7 @@ public partial class SetupWizard : Window
             host.Secrets.Save(ProviderSelector.SecretName(kind), key);
             KeyBox.Clear();
             Log.Info("app", $"{kind} API key saved from setup (value never logged)");
+            _ = host.RefreshSpeechEngineAsync();
             var model = _app.Settings.Models.GetValueOrDefault(kind, ProviderFactory.DefaultModel(kind));
             var r = await ProviderFactory.Create(new ProviderSettings(kind, model, key)).CheckAsync(CancellationToken.None);
             if (r.Ok)

@@ -11,6 +11,13 @@ public interface ISpeechRecognizer : IAsyncDisposable
     Task StopAsync(TimeSpan flushTimeout, CancellationToken ct);
 }
 
+/// <summary>Optional: a recognizer that reports non-fatal hints about the microphone or audio.</summary>
+public interface ISpeechDiagnostics
+{
+    /// <summary>A gentle, non-fatal hint (e.g. "I haven't heard any sound yet"). Never interrupts the instruction.</summary>
+    event Action<string>? Hint;
+}
+
 public interface ISpeechSynthesizer
 {
     bool IsSpeaking { get; }
