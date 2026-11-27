@@ -62,6 +62,7 @@ public partial class MainWindow : Window
 
     private void CompleteWelcome(bool mic)
     {
+        Log.Info("ui", $"welcome completed microphone={(mic ? "enabled" : "typed only")}");
         var s = _app.Settings;
         s.FirstRunCompleted = true;
         s.PrivacyConsent = true;
@@ -85,6 +86,7 @@ public partial class MainWindow : Window
     {
         var text = CommandBox.Text.Trim();
         if (text.Length == 0) return;
+        Log.Info("ui", $"typed command submitted while {(_vm.IsListening ? "listening (replaces the draft and proceeds)" : "idle")} text={Log.Text(text)}");
         if (_vm.IsListening) { _app.Host!.Conversation.EditTranscript(text); _app.Host.Conversation.PressProceed(); }
         else _app.Host!.Conversation.SubmitTyped(text);
         CommandBox.Clear();
@@ -97,9 +99,9 @@ public partial class MainWindow : Window
         CommandBox.CaretIndex = CommandBox.Text.Length;
     }
 
-    private void Talk_Click(object sender, RoutedEventArgs e) => _app.TalkOrProceed();
-    private void Stop_Click(object sender, RoutedEventArgs e) => _app.Host?.Conversation.PressCancel();
-    private void Proceed_Click(object sender, RoutedEventArgs e) => _app.Host?.Conversation.PressProceed();
+    private void Talk_Click(object sender, RoutedEventArgs e) { Log.Info("ui", "Talk button"); _app.TalkOrProceed(); }
+    private void Stop_Click(object sender, RoutedEventArgs e) { Log.Info("ui", "Stop button"); _app.Host?.Conversation.PressCancel(); }
+    private void Proceed_Click(object sender, RoutedEventArgs e) { Log.Info("ui", "Proceed button"); _app.Host?.Conversation.PressProceed(); }
 
     // ---------- History ----------
     public sealed record HistoryRow(string Badge, string When, string Meta, string Title, string Summary, string Steps);
@@ -124,17 +126,29 @@ public partial class MainWindow : Window
         ShowPage(0);
     }
 
+    /// <summary>Saves a zip with the logs, a PC/settings summary and redacted run history, for troubleshooting.</summary>
     private async void Export_Click(object sender, RoutedEventArgs e)
     {
-        var items = await _app.Host!.Store.GetHistoryAsync(200, CancellationToken.None);
-        var redacted = items.Select(h => new
+        var dlg = new Microsoft.Win32.SaveFileDialog
         {
-            h.RunId, h.StartedAt, h.Route, h.Provider, h.Success, h.InputTokens, h.OutputTokens,
-            Steps = h.Steps.Select(s => new { s.Tool, Outcome = s.Outcome.ToString(), s.Verified, s.DurationMs }),
-        });
-        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), $"VoxStride-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.json");
-        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new { Diagnostics = Diagnostics(), Runs = redacted }, new JsonSerializerOptions { WriteIndented = true }));
-        _vm.AddActivity("Exported redacted diagnostics (no instructions, paths, keys or audio) to " + path);
+            Title = "Save VoxStride diagnostics report",
+            FileName = $"VoxStride-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.zip",
+            Filter = "Zip archive (*.zip)|*.zip",
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+        };
+        if (dlg.ShowDialog(this) != true) return;
+        try
+        {
+            var items = await _app.Host!.Store.GetHistoryAsync(200, CancellationToken.None);
+            var runs = JsonSerializer.Serialize(items.Select(h => new
+            {
+                h.RunId, h.StartedAt, h.Route, h.Provider, h.Success, h.InputTokens, h.OutputTokens,
+                Steps = h.Steps.Select(st => new { st.Tool, Outcome = st.Outcome.ToString(), st.Verified, st.DurationMs }),
+            }), new JsonSerializerOptions { WriteIndented = true });
+            var path = await Task.Run(() => DiagnosticsReport.Export(dlg.FileName, _app.Settings, _app.Host, ("runs.json", runs), ("diagnostics-view.txt", Diagnostics())));
+            _vm.AddActivity("Saved the diagnostics report to " + path + ". It has no API keys, audio or files.");
+        }
+        catch (Exception ex) { Log.Error("ui", "saving the diagnostics report failed", ex); _vm.AddActivity("Couldn't save the diagnostics report: " + ex.Message, "!"); }
     }
 
     // ---------- Providers ----------
@@ -180,7 +194,7 @@ public partial class MainWindow : Window
         AutoUpdateBox.IsChecked = s.AutoCheckUpdates;
         AutoInstallBox.IsChecked = s.AutoInstallUpdates;
         RefreshUpdateUi();
-        MicConsentBox.IsChecked = s.MicrophoneConsent; RetainBox.IsChecked = s.RetainTranscripts; StartupBox.IsChecked = s.LaunchAtLogon;
+        MicConsentBox.IsChecked = s.MicrophoneConsent; RetainBox.IsChecked = s.RetainTranscripts; StartupBox.IsChecked = s.LaunchAtLogon; LogTextBox.IsChecked = s.LogConversationText;
         _app.RefreshProviderLabel();
     }
 
@@ -229,7 +243,7 @@ public partial class MainWindow : Window
                 _app.Settings.Models[kind] = model.Text.Trim();
                 if (key.Password.Length > 0)
                 {
-                    try { _app.Host!.Secrets.Save(ProviderSelector.SecretName(kind), key.Password.Trim()); key.Clear(); status.Text = "Key saved in Credential Manager"; }
+                    try { _app.Host!.Secrets.Save(ProviderSelector.SecretName(kind), key.Password.Trim()); key.Clear(); status.Text = "Key saved in Credential Manager"; Log.Info("app", $"{kind} API key saved (value never logged)"); }
                     catch (InvalidOperationException ex) { status.Text = ex.Message; }
                 }
                 if (_app.Settings.ActiveProvider is null && _app.Host!.Secrets.Load(ProviderSelector.SecretName(kind)) is { Length: > 0 }) _app.Settings.ActiveProvider = kind;
@@ -248,6 +262,7 @@ public partial class MainWindow : Window
             remove.Click += (_, _) =>
             {
                 _app.Host!.Secrets.Delete(ProviderSelector.SecretName(kind));
+                Log.Info("app", $"{kind} API key removed");
                 if (_app.Settings.ActiveProvider == kind) _app.Settings.ActiveProvider = null;
                 _app.Settings.Save();
                 _app.Host!.Providers.Invalidate();
@@ -336,7 +351,7 @@ public partial class MainWindow : Window
                 CancellationToken.None);
             MicTestText.Text = Describe(r, shown);
         }
-        catch (Exception ex) { MicTestText.Text = "✖ " + ex.Message; DiagnosticsLog.Write("speech-test error: " + ex.Message); }
+        catch (Exception ex) { MicTestText.Text = "✖ " + ex.Message; Log.Error("speech", "speech test failed", ex); }
         finally
         {
             MicLevel.Value = 0;
@@ -409,6 +424,8 @@ public partial class MainWindow : Window
         s.MicrophoneConsent = MicConsentBox.IsChecked == true;
         s.RetainTranscripts = RetainBox.IsChecked == true;
         s.LaunchAtLogon = StartupBox.IsChecked == true;
+        s.LogConversationText = LogTextBox.IsChecked == true;
+        Log.IncludeContent = s.LogConversationText;
         s.Save();
         _app.Host!.Store.RetainTranscripts = s.RetainTranscripts;
         _app.Host.ApplyStartup(s.LaunchAtLogon);
@@ -450,7 +467,20 @@ public partial class MainWindow : Window
 
     // ---------- Diagnostics ----------
     private void RefreshDiagnostics_Click(object sender, RoutedEventArgs e) => RefreshDiagnostics();
-    private void RefreshDiagnostics() => DiagnosticsText.Text = Diagnostics();
+    private void RefreshDiagnostics() => DiagnosticsText.Text = Diagnostics() + Environment.NewLine + DiagnosticsReport.Environment(_app.Settings, _app.Host) + Environment.NewLine + "Recent log:" + Environment.NewLine + RecentLog(60);
+
+    private static string RecentLog(int lines)
+    {
+        try
+        {
+            DiagnosticsLog.Flush(TimeSpan.FromMilliseconds(500));
+            using var fs = new FileStream(DiagnosticsLog.FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var r = new StreamReader(fs);
+            var all = r.ReadToEnd().Split('\n');
+            return string.Join("\n", all.Skip(Math.Max(0, all.Length - lines)));
+        }
+        catch (Exception ex) { return "(log not readable: " + ex.Message + ")"; }
+    }
 
     private string Diagnostics()
     {

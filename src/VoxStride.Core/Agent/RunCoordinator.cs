@@ -83,6 +83,7 @@ public sealed class RunCoordinator(
         CancellationTokenSource? cts;
         RunAuthorization? auth;
         lock (_gate) { cts = _activeCts; auth = _activeAuth; }
+        Log.Info("run", $"cancel requested reason={reason} active={(auth is null ? "none" : auth.RunId.ToString("N")[..8])}");
         if (auth is not null) authority.Revoke(auth.RunId); // blocks any new dispatch immediately
         if (cts is not null) await cts.CancelAsync();
         speech?.StopSpeaking();
@@ -97,11 +98,19 @@ public sealed class RunCoordinator(
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(options.MaxDuration);
 
-        var route = router.Route(command.FinalizedTranscript);
+        RouteDecision route;
+        try { route = router.Route(command.FinalizedTranscript); }
+        catch (Exception ex) { Log.Error("route", "router threw; sending to the AI instead", ex); route = RouteDecision.Cloud("router error"); }
         lat.Mark("t_route");
         var provider = route.Kind == RouteKind.Cloud ? providers.Current() : null;
         var allowed = route.Kind == RouteKind.Direct ? ToolsFor(route.Recipes) : registry.Definitions.Select(d => d.Name).ToList();
         var auth = authority.Mint(command, allowed, options.MaxDuration + TimeSpan.FromMinutes(10));
+        var runTag = auth.RunId.ToString("N")[..8];
+        Log.Info("run", $"run {runTag} start command={command.CommandId.ToString("N")[..8]} mode={command.InputMode} text={Log.Text(command.FinalizedTranscript)}");
+        Log.Info("route", $"run {runTag} route={route.Kind} reason={(Log.IncludeContent ? route.Reason : route.Reason.Split(':')[0])}" +
+            (route.Recipes.Count > 0 ? " recipes=[" + string.Join(", ", route.Recipes.Select(r => r.GetType().Name.Replace("Recipe", "", StringComparison.Ordinal))) + "]" : "") +
+            (route.Kind == RouteKind.Cloud ? $" provider={(provider is null ? "NONE (no key or budget)" : provider.Kind + "/" + provider.Model)}" : "") +
+            $" allowedTools={allowed.Count} routeMs={lat.Between("t_commit", "t_route") ?? 0:0}");
         lock (_gate) { _activeCts = cts; _activeAuth = auth; }
 
         events.Publish(auth.RunId, AgentState.Committed, "ack", "Got it: " + Truncate(command.FinalizedTranscript, 140), canCancel: true);
@@ -140,6 +149,7 @@ public sealed class RunCoordinator(
         }
         catch (OperationCanceledException)
         {
+            Log.Info("run", $"run {runTag} cancelled after {(time.GetUtcNow() - started).TotalSeconds:0.0}s (timeout={time.GetUtcNow() - started >= options.MaxDuration}) steps={steps.Count}");
             success = false;
             var done = steps.Where(s => s.Outcome is ToolOutcome.Success or ToolOutcome.Partial).ToList();
             summary = time.GetUtcNow() - started >= options.MaxDuration ? "That was taking too long, so I stopped." : "Okay, I've stopped.";
@@ -164,8 +174,11 @@ public sealed class RunCoordinator(
             {
                 await history.SaveAsync(new RunRecord(auth.RunId, command, route.Kind.ToString(), provider?.Kind.ToString(), provider?.Model, started, time.GetUtcNow(), success, summary, steps, inTok, outTok, timings), CancellationToken.None);
             }
-            catch (Exception) { /* history is best effort; never fail the run */ }
+            catch (Exception ex) { Log.Warn("run", $"run {runTag} history save failed (run result unaffected)", ex); /* history is best effort; never fail the run */ }
         }
+        Log.Info("run", $"run {runTag} end success={success} route={route.Kind} ms={(time.GetUtcNow() - started).TotalMilliseconds:0} steps={steps.Count} " +
+            $"verified={steps.Count(st => st.Verified)} failed={steps.Count(st => st.Outcome is ToolOutcome.Failure or ToolOutcome.Unknown)} tokens={inTok}+{outTok} " +
+            $"timings=[{string.Join(" ", new[] { "t_ui_ack", "t_provider_request", "t_first_provider_delta", "t_first_useful_action", "t_verified" }.Select(m => (m, v: lat.Between("t_commit", m))).Where(x => x.v is not null).Select(x => $"{x.m[2..]}={x.v:0}"))}] reply={Log.Text(summary)}");
         if (options.SpeakResults && speech is not null)
         {
             speech.PlayCue(success ? CueKind.Done : CueKind.Error);
@@ -261,7 +274,13 @@ public sealed class RunCoordinator(
         events.Publish(auth.RunId, AgentState.Executing, "step", Describe(tool), stepId);
         var req = new ToolRequest(Guid.Empty, stepId, $"{auth.RunId:N}-{stepId}-{tool}", 1, tool, args, callId);
         if (registry.TryGet(tool, out var t) && !t.Definition.Mutates) lat.Mark("t_first_useful_action");
-        var r = await broker.DispatchAsync(req, auth, ct);
+        var runTag = auth.RunId.ToString("N")[..8];
+        Log.Info("tool", $"run {runTag} {stepId} call {tool} args={ToolBroker.Redact(args)}" + (callId is null ? "" : $" callId={callId}"));
+        ToolResult r;
+        try { r = await broker.DispatchAsync(req, auth, ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { Log.Error("tool", $"run {runTag} {stepId} {tool} dispatch threw", ex); throw; }
+        Log.Write(r.Outcome is ToolOutcome.Success && (r.Verified || !(registry.TryGet(tool, out var td) && td.Definition.Mutates)) ? LogLevel.Info : LogLevel.Warn, "tool",
+            $"run {runTag} {stepId} {tool} -> outcome={r.Outcome} verified={r.Verified} error={r.ErrorCode ?? "-"} ms={r.Duration.TotalMilliseconds:0} message={Log.Text(r.Message ?? "", 300)}", null);
         if (r.Outcome is ToolOutcome.Success or ToolOutcome.Partial) lat.Mark("t_first_useful_action");
         if (r.Verified) lat.Mark("t_first_verified_result");
         steps.Add(new StepRecord(stepId, tool, r.Outcome, r.Verified, r.Message ?? r.ErrorCode ?? "", r.Duration.TotalMilliseconds));
@@ -307,6 +326,8 @@ public sealed class RunCoordinator(
         var finalText = new StringBuilder();
         var providerName = provider.Kind.ToString();
         var finished = false;
+        var runTag = auth.RunId.ToString("N")[..8];
+        Log.Info("ai", $"run {runTag} conversation provider={provider.Kind} model={provider.Model} tools={tools.Count} contextLines={command.ConversationContext.Count}");
         for (var round = 0; round < options.MaxSteps; round++)
         {
             ct.ThrowIfCancellationRequested();
@@ -317,6 +338,7 @@ public sealed class RunCoordinator(
             ProviderErrorEvent? error = null;
             var waitSw = Stopwatch.StartNew();
             var sawDelta = false;
+            long firstDeltaMs = -1;
             using var waitTimer = new PeriodicTimer(options.WaitingNoticeInterval);
             var streamTask = Task.Run(async () =>
             {
@@ -325,11 +347,13 @@ public sealed class RunCoordinator(
                     switch (ev)
                     {
                         case TextDeltaEvent td:
+                            if (!sawDelta) firstDeltaMs = waitSw.ElapsedMilliseconds;
                             sawDelta = true; lat.Mark("t_first_provider_delta");
                             text.Append(td.Text);
                             events.Publish(auth.RunId, AgentState.Planning, "draft", Truncate(text.ToString(), 400));
                             break;
                         case ToolCallStartedEvent ts:
+                            if (!sawDelta) firstDeltaMs = waitSw.ElapsedMilliseconds;
                             sawDelta = true; lat.Mark("t_first_provider_delta");
                             events.Publish(auth.RunId, AgentState.Planning, "tool-planned", Describe(ts.Name) + "…");
                             break;
@@ -349,7 +373,11 @@ public sealed class RunCoordinator(
                     events.Publish(auth.RunId, AgentState.Planning, "waiting", secs >= 5 ? $"Still waiting for {providerName} ({secs}s). Say stop or press Ctrl+Alt+X to cancel." : "Thinking…");
                 }
             }
-            await streamTask.ConfigureAwait(false);
+            try { await streamTask.ConfigureAwait(false); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { Log.Error("ai", $"run {runTag} round {round + 1} stream threw", ex); throw; }
+            Log.Info("ai", $"run {runTag} round {round + 1} provider={providerName} ms={waitSw.ElapsedMilliseconds} firstDeltaMs={(firstDeltaMs < 0 ? "none" : firstDeltaMs.ToString(System.Globalization.CultureInfo.InvariantCulture))} " +
+                $"tokens={inTok}+{outTok} toolCalls=[{string.Join(", ", calls.Select(c => c.Name))}] textChars={text.Length}" + (error is null ? "" : $" ERROR kind={error.Kind} status={error.HttpStatus?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-"} message={error.Message}"));
+            if (calls.Count == 0 && text.Length > 0) Log.Info("ai", $"run {runTag} reply={Log.Text(text.ToString())}");
 
             if (error is not null) return (false, ErrorText(error, providerName, steps), inTok, outTok);
             if (inTok + outTok > options.MaxTokensPerRun) return (false, "I stopped because this task reached the usage limit you set." + Done(steps), inTok, outTok);
@@ -369,6 +397,7 @@ public sealed class RunCoordinator(
                 if (++stepNo > options.MaxSteps) return (false, "This was taking too many steps, so I stopped to be safe." + Done(steps), inTok, outTok);
                 if (!SchemaValidator.TryParseArguments(call.RawArguments, out var args, out var perr))
                 {
+                    Log.Warn("ai", $"run {runTag} tool call {call.Name} rejected: malformed arguments ({perr}) raw={Log.Text(call.RawArguments, 200)}");
                     outputs.Add(new ToolCallOutput(call.CallId, call.Name, ToolResult.Fail("malformed_arguments", perr!).ToProviderJson(), true));
                     continue;
                 }
@@ -378,6 +407,7 @@ public sealed class RunCoordinator(
             conv.AddToolResults(outputs);
         }
 
+        if (!finished) Log.Warn("ai", $"run {runTag} stopped: reached {options.MaxSteps} rounds");
         if (!finished) return (false, "This was taking too many steps, so I stopped to be safe." + Done(steps), inTok, outTok);
         var narrative = finalText.ToString().Trim();
         var mutating = steps.Where(s => registry.TryGet(s.Tool, out var t) && t.Definition.Mutates).ToList();
@@ -385,6 +415,7 @@ public sealed class RunCoordinator(
         var mutatingOk = mutating.All(m => m.Outcome == ToolOutcome.Success && m.Verified);
         if (mutatingOk) return (true, narrative.Length > 0 ? narrative : string.Join(" ", steps.Select(s => s.Message)), inTok, outTok);
         // Something was not verified: the local, evidence-based summary wins over the model's narrative.
+        Log.Warn("run", $"run {runTag} a change wasn't verified; using the local evidence summary instead of the model's reply");
         var local = string.Join(" ", steps.Where(s => registry.TryGet(s.Tool, out var t) && t.Definition.Mutates || s.Outcome != ToolOutcome.Success).Select(s => (s.Verified ? "" : s.Outcome == ToolOutcome.Success ? "(unverified) " : "") + s.Message));
         return (false, local.Length > 0 ? local : narrative, inTok, outTok);
     }

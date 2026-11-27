@@ -139,7 +139,7 @@ public sealed class AppHost : IAsyncDisposable
             new RunOptions { MaxSteps = settings.MaxSteps, MaxDuration = TimeSpan.FromSeconds(settings.MaxRunSeconds), MaxTokensPerRun = settings.MaxTokensPerRun, SpeakResults = settings.SpeakResults }, time);
 
         var control = new ControlPhraseDetector(new ControlPhraseOptions { AllowPlainProceed = settings.AllowPlainProceed });
-        Microphone = new AudioHub(() => OpenMicrophone(Settings.MicrophoneName), DiagnosticsLog.Write);
+        Microphone = new AudioHub(() => OpenMicrophone(Settings.MicrophoneName), m => Log.Info("mic", m));
         var label = "off";
         Recognizer = enableSpeech ? CreateRecognizer(Microphone, out label) : new NullRecognizer();
         SpeechEngineLabel = label;
@@ -160,7 +160,7 @@ public sealed class AppHost : IAsyncDisposable
     private static WaveInRecorder OpenMicrophone(string? name)
     {
         var id = WaveInRecorder.ResolveDevice(name);
-        if (id < 0 && !string.IsNullOrWhiteSpace(name)) DiagnosticsLog.Write($"mic-missing saved=\"{name}\" using=default");
+        if (id < 0 && !string.IsNullOrWhiteSpace(name)) Log.Warn("mic", $"saved microphone \"{name}\" is not connected; using the Windows default");
         return new WaveInRecorder(id);
     }
 
@@ -196,10 +196,10 @@ public sealed class AppHost : IAsyncDisposable
         if (CloudTranscriber() is { } cloud)
         {
             label = cloud.Name;
-            return new CloudSpeechRecognizer(cloud, microphone, Settings.MicSensitivity, DiagnosticsLog.Write);
+            return new CloudSpeechRecognizer(cloud, microphone, Settings.MicSensitivity);
         }
         label = "Windows offline (" + (SpeechEnvironment.PickRecognizer(Settings.SpeechCulture)?.Culture.Name ?? Settings.SpeechCulture) + ")";
-        return new WindowsSpeechRecognizer(Settings.SpeechCulture, ControlPhrases, microphone, DiagnosticsLog.Write);
+        return new WindowsSpeechRecognizer(Settings.SpeechCulture, ControlPhrases, microphone);
     }
 
     public sealed record SpeechTestResult(string Engine, string Device, long Buffers, double Peak, string Heard, IReadOnlyList<string> Problems);
@@ -216,7 +216,7 @@ public sealed class AppHost : IAsyncDisposable
         var text = new System.Text.StringBuilder();
         try
         {
-            using var hub = new AudioHub(() => OpenMicrophone(microphoneName), DiagnosticsLog.Write);
+            using var hub = new AudioHub(() => OpenMicrophone(microphoneName), m => Log.Info("mic", "[test] " + m));
             hub.Level += level;
             using var meter = hub.Acquire("speech-test");
             var rec = CreateRecognizer(hub, out var engine);
@@ -236,7 +236,7 @@ public sealed class AppHost : IAsyncDisposable
             finally { await rec.DisposeAsync(); }
             string result;
             lock (text) result = text.ToString();
-            DiagnosticsLog.Write($"speech-test engine={engine} device=\"{meter.DeviceLabel}\" buffers={meter.Buffers} peak={meter.Peak:0} words={result.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length} problems={problems.Count}");
+            Log.Info("speech", $"speech test engine={engine} device=\"{meter.DeviceLabel}\" buffers={meter.Buffers} peak={meter.Peak:0} words={result.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length} problems={problems.Count} heard={Log.Text(result)}" + (problems.Count > 0 ? " lastProblem=" + problems[^1] : ""));
             return new SpeechTestResult(engine, meter.DeviceLabel, meter.Buffers, meter.Peak, result, problems);
         }
         finally { _ = StartWakeAsync(); }
@@ -245,9 +245,9 @@ public sealed class AppHost : IAsyncDisposable
     /// <summary>Applies a newly chosen microphone without a restart.</summary>
     public void MicrophoneChanged()
     {
-        DiagnosticsLog.Write($"mic-selected \"{Settings.MicrophoneName ?? "Windows default"}\"");
+        Log.Info("mic", $"microphone selected \"{Settings.MicrophoneName ?? "Windows default"}\" (device open={Microphone.IsOpen}, leases={Microphone.LeaseCount})");
         MicrophoneLabel = WaveInRecorder.DescribeDevice(WaveInRecorder.ResolveDevice(Settings.MicrophoneName));
-        try { Microphone.Reopen(); } catch (Exception ex) { DiagnosticsLog.Write("mic-reopen failed: " + ex.Message); }
+        try { Microphone.Reopen(); } catch (Exception ex) { Log.Error("mic", "re-opening the microphone failed", ex); }
     }
 
     private ICloudVoice? CreateCloudVoice()
@@ -262,7 +262,7 @@ public sealed class AppHost : IAsyncDisposable
     public async Task StartAsync(CancellationToken ct)
     {
         MicrophoneLabel = WaveInRecorder.DescribeDevice(WaveInRecorder.ResolveDevice(Settings.MicrophoneName));
-        DiagnosticsLog.Write($"start v{UpdateService.CurrentVersion.ToString(3)} os={Environment.OSVersion.Version} speech={SpeechEngineLabel} mic={MicrophoneLabel} micDevices=[{string.Join(" | ", WaveInRecorder.Devices())}] provider={Settings.ActiveProvider?.ToString() ?? "none"} cloudSpeechConsent={Settings.CloudSpeechConsent}");
+        Log.Info("app", $"host start v{UpdateService.CurrentVersion.ToString(3)} speech={SpeechEngineLabel} mic={MicrophoneLabel} micDevices=[{string.Join(" | ", WaveInRecorder.Devices())}] provider={Settings.ActiveProvider?.ToString() ?? "none"} cloudSpeechConsent={Settings.CloudSpeechConsent}");
         _ = Apps.BuildAsync(ct); // catalog builds in the background; direct disk queries never wait for it
         await Rules.RefreshAsync(ct);
         var unresolved = await Store.GetUnresolvedMovesAsync(ct);
@@ -288,12 +288,12 @@ public sealed class AppHost : IAsyncDisposable
         {
             _yieldedTo = other;
             await StopWakeAsync();
-            DiagnosticsLog.Write("mic-yield: " + other);
+            Log.Info("mic", $"yielding: {other} is using the microphone; wake word paused");
             Events.Publish(Guid.Empty, AgentState.Standby, "wake-unavailable", $"{other} is using the microphone, so I've stopped listening for \"Hey VoxStride\" until it's done. Ctrl+Alt+V still works.", canCancel: false);
         }
         else if (other is null && _yieldedTo is not null)
         {
-            DiagnosticsLog.Write("mic-resume");
+            Log.Info("mic", "microphone free again; wake word resumes" + (_conversationIdle ? "" : " after the current instruction"));
             _yieldedTo = null;
             if (_conversationIdle) await StartWakeAsync();
         }
@@ -303,8 +303,8 @@ public sealed class AppHost : IAsyncDisposable
 
     public async Task StartWakeAsync()
     {
-        if (!Settings.WakeWordEnabled || !Settings.MicrophoneConsent || Recognizer is NullRecognizer) return;
-        if (_yieldedTo is not null) return; // another app is using the microphone
+        if (!Settings.WakeWordEnabled || !Settings.MicrophoneConsent || Recognizer is NullRecognizer) { Log.Debug("wake", $"wake not started (enabled={Settings.WakeWordEnabled}, micConsent={Settings.MicrophoneConsent}, speech={Recognizer is not NullRecognizer})"); return; }
+        if (_yieldedTo is not null) { Log.Debug("wake", $"wake not started: {_yieldedTo} is using the microphone"); return; } // another app is using the microphone
         try
         {
             Wake ??= CreateWake();
@@ -313,13 +313,13 @@ public sealed class AppHost : IAsyncDisposable
         catch (Exception ex)
         {
             Events.Publish(Guid.Empty, AgentState.Standby, "wake-unavailable", "Wake word is unavailable (" + ex.Message + "). Use Ctrl+Alt+V instead.", canCancel: false);
-            DiagnosticsLog.Write("wake-unavailable: " + ex.Message);
+            Log.Error("wake", "wake word could not start", ex);
         }
     }
 
     private WindowsWakeWordDetector CreateWake()
     {
-        var w = new WindowsWakeWordDetector(Settings.SpeechCulture, Microphone, DiagnosticsLog.Write);
+        var w = new WindowsWakeWordDetector(Settings.SpeechCulture, Microphone);
         string? trailing = null;
         w.TrailingText += t => trailing = t;
         w.WakeDetected += detectedAt =>
@@ -331,6 +331,7 @@ public sealed class AppHost : IAsyncDisposable
                 var text = Interlocked.Exchange(ref trailing, null);
                 // Hold the microphone open across the handover so dictation starts on the same open device
                 // instead of closing and reopening it (which loses the first words).
+                Log.Info("wake", "wake phrase detected; handing the microphone to dictation" + (text is null ? "" : " trailing=" + Log.Text(text)));
                 var bridge = Microphone.Acquire("handoff");
                 await w.StopAsync();
                 Conversation.ActivateFromWake(text);

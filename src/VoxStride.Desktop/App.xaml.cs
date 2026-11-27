@@ -43,15 +43,22 @@ public partial class App : Application
             return;
         }
 
+        DiagnosticsLog.Start(includeContent: true);
+        WireCrashHandlers();
         _singleInstance = new Mutex(true, @"Local\VoxStride.SingleInstance", out var first);
         if (!first)
         {
             // Another instance is running: it will surface itself via its tray icon.
+            Log.Info("app", "another VoxStride is already running; this instance exits");
+            DiagnosticsLog.Flush(TimeSpan.FromSeconds(1));
             Shutdown(0);
             return;
         }
 
+        var startup = System.Diagnostics.Stopwatch.StartNew();
         Settings = AppSettings.Load();
+        Log.IncludeContent = Settings.LogConversationText;
+        Log.Info("app", $"===== VoxStride {UpdateService.CurrentVersion.ToString(3)} starting (log session {DiagnosticsLog.SessionId}) args=[{string.Join(" ", e.Args)}] conversationText={(Settings.LogConversationText ? "on" : "off")} =====");
         var approvals = new WpfApproval(Dispatcher, async (op, scope) =>
         {
             await Host!.Store.AddRuleAsync(op, scope, CancellationToken.None);
@@ -69,6 +76,9 @@ public partial class App : Application
         RefreshProviderLabel();
         if (!Settings.MicrophoneConsent) { _muted = true; Host.Conversation.SetMuted(true); }
         await Host.StartAsync(CancellationToken.None);
+        try { Log.Info("app", "environment\n" + DiagnosticsReport.Environment(Settings, Host)); } catch (Exception ex) { Log.Warn("app", "environment report failed", ex); }
+        Log.Info("app", $"startup complete in {startup.ElapsedMilliseconds} ms");
+        StartHealthLog();
 
         var background = e.Args.Contains("--background") && Settings.FirstRunCompleted;
         if (!background) _main.Show();
@@ -89,17 +99,48 @@ public partial class App : Application
         h.Events.Published += ev => Dispatcher.BeginInvoke(() => _vm.Apply(ev));
         h.Conversation.StateChanged += s => Dispatcher.BeginInvoke(() => OnStateChanged(s));
         h.Conversation.TranscriptChanged += (f, i) => Dispatcher.BeginInvoke(() => { _vm.FinalTranscript = f; _vm.InterimTranscript = i; });
-        h.Conversation.Notice += n => { DiagnosticsLog.Write("notice: " + n); Dispatcher.BeginInvoke(() => { _vm.Status = n; _vm.AddActivity(n); }); };
-        h.Conversation.StateChanged += s => DiagnosticsLog.Write("state: " + s);
+        h.Conversation.Notice += n => { Log.Info("ui", "notice shown: " + n); Dispatcher.BeginInvoke(() => { _vm.Status = n; _vm.AddActivity(n); }); };
         h.Events.Published += ev =>
         {
-            if (ev.Phase is "wake-unavailable" or "speech-hint" or "recovery" or "no-provider") DiagnosticsLog.Write($"{ev.Phase}: {ev.Message}");
-            else if (ev.Phase is "result" or "cancelled") DiagnosticsLog.Write($"{ev.Phase}: {ev.State}");
+            if (ev.Phase is "draft" or "waiting") return; // streaming text and wait ticks are summarized by the run log
+            Log.Write(ev.Phase is "wake-unavailable" or "no-provider" or "recovery" ? LogLevel.Warn : LogLevel.Debug, "ui",
+                $"event {ev.Phase} state={ev.State}" + (ev.RunId == Guid.Empty ? "" : " run=" + ev.RunId.ToString("N")[..8]) + (ev.StepId is null ? "" : " step=" + ev.StepId) + " message=" + Log.Text(ev.Message, 300), null);
         };
         h.Conversation.Committed += c => Dispatcher.BeginInvoke(() => _vm.AddActivity("You: " + c.FinalizedTranscript, "🗣"));
-        h.Broker.Blocked += (tool, reason) => { DiagnosticsLog.Write($"blocked: {tool} {reason}"); Dispatcher.BeginInvoke(() => _vm.AddActivity($"Blocked {tool}: {reason}", "⛔")); };
-        DispatcherUnhandledException += (_, a) => DiagnosticsLog.Write("ui-exception: " + a.Exception.GetType().Name + ": " + a.Exception.Message);
-        AppDomain.CurrentDomain.UnhandledException += (_, a) => DiagnosticsLog.Write("fatal: " + a.ExceptionObject);
+        h.Broker.Blocked += (tool, reason) => Dispatcher.BeginInvoke(() => _vm.AddActivity($"Blocked {tool}: {reason}", "⛔"));
+    }
+
+    /// <summary>Every kind of unhandled exception is logged with its full stack trace and flushed to disk.</summary>
+    private void WireCrashHandlers()
+    {
+        DispatcherUnhandledException += (_, a) => { Log.Error("ui", "unhandled UI exception", a.Exception); DiagnosticsLog.Flush(TimeSpan.FromSeconds(2)); };
+        AppDomain.CurrentDomain.UnhandledException += (_, a) =>
+        {
+            Log.Error("app", $"FATAL unhandled exception (terminating={a.IsTerminating})", a.ExceptionObject as Exception ?? new Exception(a.ExceptionObject?.ToString()));
+            DiagnosticsLog.Flush(TimeSpan.FromSeconds(3));
+        };
+        TaskScheduler.UnobservedTaskException += (_, a) => Log.Error("app", "unobserved background task exception", a.Exception);
+    }
+
+    private DispatcherTimer? _healthTimer;
+
+    /// <summary>Every 10 minutes: memory, threads, handles, state — so leaks and stuck states show up in the log.</summary>
+    private void StartHealthLog()
+    {
+        void Write()
+        {
+            try
+            {
+                using var p = System.Diagnostics.Process.GetCurrentProcess();
+                Log.Info("app", $"health mem={p.WorkingSet64 / 1_048_576}MB managed={GC.GetTotalMemory(false) / 1_048_576}MB threads={p.Threads.Count} handles={p.HandleCount} " +
+                    $"state={_vm.State} muted={_muted} micOpen={Host?.Microphone.IsOpen} micLeases={Host?.Microphone.LeaseCount} wake={(Host?.Wake?.IsListening == true ? "listening" : "off")} up={(DateTime.Now - p.StartTime).TotalMinutes:0}min");
+            }
+            catch (Exception ex) { Log.Warn("app", "health check failed", ex); }
+        }
+        Write();
+        _healthTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(10) };
+        _healthTimer.Tick += (_, _) => Write();
+        _healthTimer.Start();
     }
 
     private async void OnStateChanged(AgentState s)
@@ -108,8 +149,12 @@ public partial class App : Application
         ApplyOverlayVisibility();
         if (s == AgentState.Listening) { _vm.FinalTranscript = ""; _vm.InterimTranscript = ""; _vm.Status = "Speak naturally — pauses are fine. Say \"VoxStride, execute\" or press Proceed when done."; }
         Host?.SetConversationIdle(s is AgentState.Standby or AgentState.Muted);
-        if (s == AgentState.Standby && Host is not null && !_muted) await Host.StartWakeAsync();
-        if (s is AgentState.Listening) await (Host?.StopWakeAsync() ?? Task.CompletedTask);
+        try
+        {
+            if (s == AgentState.Standby && Host is not null && !_muted) await Host.StartWakeAsync();
+            if (s is AgentState.Listening) await (Host?.StopWakeAsync() ?? Task.CompletedTask);
+        }
+        catch (Exception ex) { Log.Error("wake", $"wake start/stop failed on state {s}", ex); }
     }
 
     public void ApplyOverlayVisibility()
@@ -148,7 +193,9 @@ public partial class App : Application
         _updateBusy = true;
         try
         {
+            Log.Info("update", $"checking for updates (requested={userRequested}) current={UpdateService.CurrentVersion.ToString(3)}");
             AvailableUpdate = await _updates.CheckAsync(CancellationToken.None);
+            Log.Info("update", AvailableUpdate is { } found ? $"update available {found.Version.ToString(3)} size={found.Size / 1_000_000}MB" : "no update available");
             Settings.LastUpdateCheck = DateTimeOffset.UtcNow;
             Settings.Save();
             if (AvailableUpdate is { } u)
@@ -160,6 +207,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
+            Log.Warn("update", "update check failed", ex);
             if (userRequested) _vm.AddActivity("I couldn't check for updates: " + ex.Message, "!");
         }
         finally { _updateBusy = false; UpdateStateChanged?.Invoke(); }
@@ -168,14 +216,15 @@ public partial class App : Application
     public async Task InstallUpdateAsync()
     {
         if (AvailableUpdate is not { } u || _updateBusy) return;
-        if (Host?.Runs is not null && _vm.IsBusy) { _vm.AddActivity("I'll update after the current task finishes."); return; }
+        if (Host?.Runs is not null && _vm.IsBusy) { Log.Info("update", "install postponed: a task is running"); _vm.AddActivity("I'll update after the current task finishes."); return; }
         _updateBusy = true;
         try
         {
             void Show(string text) { UpdateProgress = text; _vm.Status = text; UpdateStateChanged?.Invoke(); }
             var sizeMb = u.Size > 0 ? $" ({u.Size / 1_000_000} MB)" : "";
             Show($"Downloading version {u.Version.ToString(3)}{sizeMb}… 0%");
-            DiagnosticsLog.Write($"update-download-start {u.Version.ToString(3)}");
+            Log.Info("update", $"download start {u.Version.ToString(3)} from {u.InstallerUrl}");
+            var dl = System.Diagnostics.Stopwatch.StartNew();
             var last = -1;
             var path = await _updates.DownloadAsync(u, new Progress<double>(p =>
             {
@@ -184,7 +233,8 @@ public partial class App : Application
                 Show($"Downloading version {u.Version.ToString(3)}{sizeMb}… {p:0}%");
             }), CancellationToken.None);
             Show("Download verified. Installing — VoxStride will close and reopen by itself in a few seconds.");
-            DiagnosticsLog.Write("update-install-launch");
+            Log.Info("update", $"download verified in {dl.Elapsed.TotalSeconds:0}s; launching installer {path}");
+            DiagnosticsLog.Flush(TimeSpan.FromSeconds(2));
             _vm.AddActivity("Update verified. Installing — VoxStride will restart in a few seconds.", "⬆");
             UpdateService.LaunchInstaller(path);
             await Task.Delay(800);
@@ -193,7 +243,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             UpdateProgress = "The update didn't install: " + ex.Message;
-            DiagnosticsLog.Write("update-error: " + ex.Message);
+            Log.Error("update", "update failed", ex);
             _vm.AddActivity(UpdateProgress, "!");
             _updateBusy = false;
             UpdateStateChanged?.Invoke();
@@ -203,6 +253,7 @@ public partial class App : Application
     /// <summary>Restarts VoxStride (used after changing speech engine settings).</summary>
     public async void RestartApp()
     {
+        Log.Info("app", "restarting VoxStride");
         IsExiting = true;
         if (_tray is not null) { _tray.Visible = false; _tray.Dispose(); _tray = null; }
         UnregisterHotkeys();
@@ -211,6 +262,7 @@ public partial class App : Application
         _singleInstance?.Dispose();
         _singleInstance = null;
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false });
+        DiagnosticsLog.Flush(TimeSpan.FromSeconds(2));
         Shutdown(0);
     }
 
@@ -220,6 +272,7 @@ public partial class App : Application
     public void TalkOrProceed()
     {
         if (Host is null) return;
+        Log.Info("ui", $"talk/proceed pressed state={_vm.State} muted={_muted}");
         if (_muted) { ToggleMute(); }
         if (_vm.IsListening) Host.Conversation.PressProceed();
         else Host.Conversation.ActivateFromHotkey();
@@ -235,6 +288,7 @@ public partial class App : Application
             return;
         }
         _muted = !_muted;
+        Log.Info("ui", $"microphone {(_muted ? "muted" : "unmuted")} by user");
         Host.Conversation.SetMuted(_muted);
         _overlay?.SetMuted(_muted);
         if (_muted) _ = Host.StopWakeAsync(); else _ = Host.StartWakeAsync();
@@ -263,7 +317,7 @@ public partial class App : Application
         };
         var menu = _tray.ContextMenuStrip;
         menu.Items.Add("Talk  (Ctrl+Alt+V)", null, (_, _) => Dispatcher.Invoke(TalkOrProceed));
-        menu.Items.Add("Stop  (Ctrl+Alt+X)", null, (_, _) => Dispatcher.Invoke(() => Host?.Conversation.PressCancel()));
+        menu.Items.Add("Stop  (Ctrl+Alt+X)", null, (_, _) => Dispatcher.Invoke(() => { Log.Info("ui", "tray: stop"); Host?.Conversation.PressCancel(); }));
         menu.Items.Add("Mute / unmute  (Ctrl+Alt+M)", null, (_, _) => Dispatcher.Invoke(ToggleMute));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("Open VoxStride", null, (_, _) => Dispatcher.Invoke(() => ShowMain()));
@@ -277,6 +331,7 @@ public partial class App : Application
 
     private async void ExitApp()
     {
+        Log.Info("app", "exiting VoxStride");
         IsExiting = true;
         if (_tray is not null) { _tray.Visible = false; _tray.Dispose(); _tray = null; }
         UnregisterHotkeys();
@@ -284,6 +339,8 @@ public partial class App : Application
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         if (Host is not null) await Host.DisposeAsync();
         try { _singleInstance?.ReleaseMutex(); } catch (ApplicationException) { }
+        Log.Info("app", "===== VoxStride stopped =====");
+        DiagnosticsLog.Flush(TimeSpan.FromSeconds(2));
         Shutdown(0);
     }
 
@@ -299,7 +356,8 @@ public partial class App : Application
         var ok = RegisterHotKey(_hotkeySink.Handle, HK_TALK, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x56 /* V */)
                & RegisterHotKey(_hotkeySink.Handle, HK_STOP, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x58 /* X */)
                & RegisterHotKey(_hotkeySink.Handle, HK_MUTE, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x4D /* M */);
-        if (!ok) _vm.AddActivity("Some global shortcuts are used by another app. The tray menu and buttons still work.", "!");
+        if (!ok) { Log.Warn("hotkey", $"some global shortcuts could not be registered (win32 error {Marshal.GetLastWin32Error()}); another app may own them"); _vm.AddActivity("Some global shortcuts are used by another app. The tray menu and buttons still work.", "!"); }
+        else Log.Info("hotkey", "shortcuts registered: Ctrl+Alt+V talk, Ctrl+Alt+X stop, Ctrl+Alt+M mute");
     }
 
     private void UnregisterHotkeys()
@@ -315,6 +373,7 @@ public partial class App : Application
     {
         if (msg != 0x0312 /* WM_HOTKEY */) return IntPtr.Zero;
         handled = true;
+        Log.Info("hotkey", wParam.ToInt32() switch { HK_TALK => "Ctrl+Alt+V (talk)", HK_STOP => "Ctrl+Alt+X (stop)", HK_MUTE => "Ctrl+Alt+M (mute)", _ => "unknown" } + " pressed");
         switch (wParam.ToInt32())
         {
             case HK_TALK: TalkOrProceed(); break;
@@ -327,6 +386,7 @@ public partial class App : Application
     // ---------- Lock / sleep ----------
     private void OnSessionSwitch(object? sender, SessionSwitchEventArgs e)
     {
+        Log.Info("app", "windows session: " + e.Reason);
         if (e.Reason is SessionSwitchReason.SessionLock or SessionSwitchReason.ConsoleDisconnect or SessionSwitchReason.RemoteDisconnect)
         {
             Host?.Conversation.SetSessionLocked(true);
@@ -338,6 +398,7 @@ public partial class App : Application
 
     private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
     {
+        Log.Info("app", "power: " + e.Mode);
         if (e.Mode == PowerModes.Suspend) { Host?.Conversation.SetSessionLocked(true); _ = Host?.StopWakeAsync(); }
         else if (e.Mode == PowerModes.Resume) Host?.Conversation.SetSessionLocked(false);
     }

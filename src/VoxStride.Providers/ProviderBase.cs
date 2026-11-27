@@ -53,7 +53,7 @@ public abstract class ProviderBase : IReasoningProvider
         if (string.IsNullOrWhiteSpace(settings.ApiKey)) throw new ArgumentException("API key is required.", nameof(settings));
         if (string.IsNullOrWhiteSpace(settings.Model)) throw new ArgumentException("Model is required.", nameof(settings));
         Settings = settings;
-        Http = new HttpClient(handler ?? new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), AutomaticDecompression = DecompressionMethods.All, ConnectTimeout = TimeSpan.FromSeconds(10) }, disposeHandler: handler is null)
+        Http = new HttpClient(new LoggingHandler(handler ?? new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), AutomaticDecompression = DecompressionMethods.All, ConnectTimeout = TimeSpan.FromSeconds(10) }), disposeHandler: handler is null)
         {
             Timeout = Timeout.InfiniteTimeSpan,
         };
@@ -104,11 +104,20 @@ public abstract class ProviderBase : IReasoningProvider
         firstByte.CancelAfter(FirstByteTimeout);
         HttpResponseMessage resp;
         try { resp = await Http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, firstByte.Token).ConfigureAwait(false); }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return (null, new ProviderErrorEvent(ProviderErrorKind.Timeout, "No response before timeout.")); }
-        catch (HttpRequestException ex) { return (null, new ProviderErrorEvent(ProviderErrorKind.Disconnected, ex.Message)); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            Log.Warn("ai", $"{Kind} no response within {FirstByteTimeout.TotalSeconds:0}s ({LoggingHandler.Describe(req.RequestUri)})");
+            return (null, new ProviderErrorEvent(ProviderErrorKind.Timeout, "No response before timeout."));
+        }
+        catch (HttpRequestException ex)
+        {
+            Log.Warn("ai", $"{Kind} network error: {ex.Message}", ex);
+            return (null, new ProviderErrorEvent(ProviderErrorKind.Disconnected, ex.Message));
+        }
         if (!resp.IsSuccessStatusCode)
         {
             var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            Log.Warn("ai", $"{Kind} model={Model} HTTP {(int)resp.StatusCode} body={(body.Length > 600 ? body[..600] + "…" : body)}");
             var kind = MapStatus(resp.StatusCode);
             var status = (int)resp.StatusCode;
             resp.Dispose();
@@ -124,8 +133,9 @@ public abstract class ProviderBase : IReasoningProvider
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(15));
             using var resp = await Http.SendAsync(req, cts.Token).ConfigureAwait(false);
-            if (resp.IsSuccessStatusCode) return new ProviderCheckResult(true, $"Connected. Model {Model} is available.");
+            if (resp.IsSuccessStatusCode) { Log.Info("ai", $"{Kind} key check ok model={Model}"); return new ProviderCheckResult(true, $"Connected. Model {Model} is available."); }
             var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            Log.Warn("ai", $"{Kind} key check failed model={Model} HTTP {(int)resp.StatusCode} body={(body.Length > 600 ? body[..600] + "…" : body)}");
             var kind = MapStatus(resp.StatusCode);
             return new ProviderCheckResult(false, kind switch
             {
@@ -134,8 +144,8 @@ public abstract class ProviderBase : IReasoningProvider
                 _ => $"Check failed ({(int)resp.StatusCode}): {SafeErrorMessage(body)}",
             }, kind);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return new ProviderCheckResult(false, "Timed out.", ProviderErrorKind.Timeout); }
-        catch (HttpRequestException ex) { return new ProviderCheckResult(false, "Network error: " + ex.Message, ProviderErrorKind.Disconnected); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { Log.Warn("ai", $"{Kind} key check timed out"); return new ProviderCheckResult(false, "Timed out.", ProviderErrorKind.Timeout); }
+        catch (HttpRequestException ex) { Log.Warn("ai", $"{Kind} key check network error", ex); return new ProviderCheckResult(false, "Network error: " + ex.Message, ProviderErrorKind.Disconnected); }
     }
 
     protected static StringContent Json(JsonNode body) => new(body.ToJsonString(), Encoding.UTF8, "application/json");

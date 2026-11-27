@@ -11,6 +11,8 @@ namespace Xunit
     public sealed class TheoryAttribute : FactAttribute { }
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
     public sealed class InlineDataAttribute(params object?[] data) : Attribute { public object?[] Data { get; } = data; }
+    [AttributeUsage(AttributeTargets.Class)]
+    public sealed class CollectionAttribute(string name) : Attribute { public string Name { get; } = name; } // shim runs tests sequentially anyway
 
     public sealed class AssertException(string m) : Exception(m);
 
@@ -36,7 +38,11 @@ namespace Xunit
         public static void NotNull(object? o) { if (o is null) throw new AssertException("Expected not null"); }
         public static void Empty(IEnumerable e) { if (e.Cast<object>().Any()) throw new AssertException("Expected empty"); }
         public static void NotEmpty(IEnumerable e) { if (!e.Cast<object>().Any()) throw new AssertException("Expected not empty"); }
+        public static T Single<T>(IEnumerable<T> e, Predicate<T> pred) => Single(e.Where(x => pred(x)));
         public static T Single<T>(IEnumerable<T> e) { var l = e.ToList(); if (l.Count != 1) throw new AssertException($"Expected single, got {l.Count}"); return l[0]; }
+        public static void Contains(string sub, string? s, StringComparison c) { if (s is null || !s.Contains(sub, c)) throw new AssertException($"'{s}' does not contain '{sub}'"); }
+        public static void DoesNotContain(string sub, string? s, StringComparison c) { if (s is not null && s.Contains(sub, c)) throw new AssertException($"'{s}' contains '{sub}'"); }
+        public static void StartsWith(string p, string? s, StringComparison c) { if (s is null || !s.StartsWith(p, c)) throw new AssertException($"'{s}' does not start with '{p}'"); }
         public static void Contains(string sub, string? s) { if (s is null || !s.Contains(sub, StringComparison.Ordinal)) throw new AssertException($"'{s}' does not contain '{sub}'"); }
         public static void DoesNotContain(string sub, string? s) { if (s is not null && s.Contains(sub, StringComparison.Ordinal)) throw new AssertException($"'{s}' contains '{sub}'"); }
         public static void Contains<T>(T item, IEnumerable<T> e) { if (!e.Contains(item)) throw new AssertException($"Collection does not contain {item}"); }

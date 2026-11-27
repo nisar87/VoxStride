@@ -4,6 +4,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 
+using VoxStride.Contracts;
+
 namespace VoxStride.Desktop;
 
 /// <summary>
@@ -36,9 +38,9 @@ public partial class OverlayWindow : Window
         Top = wa.Top + 16;
     }
 
-    private void Proceed_Click(object sender, RoutedEventArgs e) => _app.Host?.Conversation.PressProceed();
-    private void Cancel_Click(object sender, RoutedEventArgs e) => _app.Host?.Conversation.PressCancel();
-    private void Mute_Click(object sender, RoutedEventArgs e) => _app.ToggleMute();
+    private void Proceed_Click(object sender, RoutedEventArgs e) { Log.Info("ui", "overlay Proceed"); _app.Host?.Conversation.PressProceed(); }
+    private void Cancel_Click(object sender, RoutedEventArgs e) { Log.Info("ui", "overlay Cancel"); _app.Host?.Conversation.PressCancel(); }
+    private void Mute_Click(object sender, RoutedEventArgs e) { Log.Info("ui", "overlay Mute"); _app.ToggleMute(); }
 
     public void SetMuted(bool muted) => MuteButton.Content = muted ? "Unmute" : "Mute";
 

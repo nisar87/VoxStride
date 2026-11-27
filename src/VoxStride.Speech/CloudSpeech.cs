@@ -33,7 +33,7 @@ public sealed class CloudSpeechRecognizer : ISpeechRecognizer, ISpeechDiagnostic
     {
         _transcriber = transcriber;
         _mic = microphone;
-        _log = log;
+        _log = log ?? (m => Log.Info("speech", m));
         Sensitivity = sensitivity;
         _mic.DeviceError += m => { if (_lease is not null) Error?.Invoke(m); };
     }
@@ -149,6 +149,7 @@ public sealed class NaturalSpeechSynthesizer(WindowsSpeechSynthesizer local, ICl
     {
         if (!local.Enabled || string.IsNullOrWhiteSpace(text)) return;
         StopSpeaking();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         lock (_gate) _current = cts;
         byte[]? wav = null;
@@ -158,8 +159,14 @@ public sealed class NaturalSpeechSynthesizer(WindowsSpeechSynthesizer local, ICl
             timeout.CancelAfter(TimeSpan.FromSeconds(6));
             try { wav = await c.SynthesizeAsync(text, timeout.Token).ConfigureAwait(false); } catch (OperationCanceledException) { }
         }
-        if (cts.IsCancellationRequested) return;
-        if (wav is null || wav.Length < 100) { await local.SpeakAsync(text, cts.Token).ConfigureAwait(false); return; }
+        if (cts.IsCancellationRequested) { Log.Debug("tts", "speech interrupted before playback"); return; }
+        if (wav is null || wav.Length < 100)
+        {
+            if (Cloud is not null) Log.Info("tts", $"natural voice unavailable after {sw.ElapsedMilliseconds} ms; using the Windows voice");
+            await local.SpeakAsync(text, cts.Token).ConfigureAwait(false);
+            return;
+        }
+        Log.Info("tts", $"natural voice ready in {sw.ElapsedMilliseconds} ms, playing {(wav.Length - 44) / 48000.0:0.0}s");
         var p = Marshal.AllocHGlobal(wav.Length);
         Marshal.Copy(wav, 0, p, wav.Length);
         lock (_gate) { FreePlaying(); _playing = p; }

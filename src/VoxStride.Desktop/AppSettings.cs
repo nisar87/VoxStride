@@ -26,7 +26,7 @@ public sealed class AppSettings
         [ProviderKind.Gemini] = ProviderFactory.DefaultModel(ProviderKind.Gemini),
     };
     public string SpeechCulture { get; set; } = "en-US";
-    /// <summary>Auto = OpenAI/Gemini cloud speech when allowed and a key exists, else Windows online dictation, else Windows offline speech.</summary>
+    /// <summary>Auto = OpenAI/Gemini cloud speech when allowed and a key exists, else Windows offline speech.</summary>
     public SpeechEngine SpeechEngine { get; set; } = SpeechEngine.Auto;
     /// <summary>Explicit consent to send voice audio (only while giving an instruction) to the chosen speech service.</summary>
     public bool CloudSpeechConsent { get; set; }
@@ -55,6 +55,8 @@ public sealed class AppSettings
     public int MaxSteps { get; set; } = 30;
     public int MaxRunSeconds { get; set; } = 180;
     public bool ShowOverlay { get; set; } = true;
+    /// <summary>Include what the user says and VoxStride's replies in the local diagnostics log (never audio, never keys).</summary>
+    public bool LogConversationText { get; set; } = true;
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
 
@@ -69,15 +71,34 @@ public sealed class AppSettings
             {
                 var loaded = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath), Json) ?? new AppSettings();
                 if (loaded.SpeechEngine == SpeechEngine.WindowsOnline) loaded.SpeechEngine = SpeechEngine.Auto;
+                loaded._saved = loaded.Snapshot();
                 return loaded;
             }
         }
-        catch (Exception) { /* corrupt settings: fall back to safe defaults */ }
-        return new AppSettings();
+        catch (Exception ex) { Log.Warn("app", "settings file unreadable; using defaults", ex); /* corrupt settings: fall back to safe defaults */ }
+        var fresh = new AppSettings();
+        fresh._saved = fresh.Snapshot();
+        return fresh;
+    }
+
+    private Dictionary<string, string> _saved = new();
+
+    /// <summary>Every setting as text (settings hold no secrets; keys live in Windows Credential Manager).</summary>
+    public Dictionary<string, string> Snapshot()
+    {
+        var d = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (k, v) in JsonSerializer.SerializeToNode(this, Json)!.AsObject()) d[k] = v?.ToJsonString() ?? "null";
+        return d;
     }
 
     public void Save()
     {
+        var now = Snapshot();
+        var changes = new List<string>();
+        foreach (var (k, v) in now)
+            if (k != nameof(LastUpdateCheck) && (!_saved.TryGetValue(k, out var old) || old != v)) changes.Add($"{k}: {(_saved.TryGetValue(k, out var o) ? o : "unset")} -> {v}");
+        if (changes.Count > 0) Log.Info("app", "settings changed: " + string.Join("; ", changes));
+        _saved = now;
         Directory.CreateDirectory(Folder);
         var tmp = FilePath + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(this, Json));

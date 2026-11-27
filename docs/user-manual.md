@@ -44,6 +44,8 @@ Changes to your files show an approval window with the exact list of what will h
 - History keeps results, not your words, unless you turn on **Keep my instruction text**.
 - **Mute** (Ctrl+Alt+M) closes the microphone. **Clear history** and **Revoke all** are under Privacy.
 - API keys are stored in Windows Credential Manager. The uninstaller can remove them.
+- **Diagnostics log**: VoxStride keeps a detailed log on your PC at `%LocalAppData%\VoxStride\logs` (five files of up to 5 MB each). It records what VoxStride did and why: microphone, speech, routing, AI requests, tools, updates and errors. It never contains audio or API keys. Keys are removed automatically, even from error messages. By default it also includes what you said and VoxStride's replies, because that is what makes recognition problems fixable. Turn off **Include what I say… in the diagnostics log** under Privacy to log only lengths. Words heard in standby (while waiting for "Hey VoxStride") are never logged.
+- **Save diagnostics report** (About, or History) creates a zip with the logs, a PC/settings summary and run history. It contains no keys, audio or files, so you can send it for troubleshooting.
 
 ## 6a. Updates
 VoxStride checks GitHub for new versions, verifies each download's checksum, and installs updates by itself when you aren't using it. Afterwards it restarts on the new version. You can turn this off or click **Check for updates** under **About & diagnostics**.

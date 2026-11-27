@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
+using VoxStride.Contracts;
 
 namespace VoxStride.Providers;
 
@@ -22,8 +23,11 @@ public interface ICloudVoice
 internal static class SpeechHttp
 {
     public static HttpClient Client(HttpMessageHandler? handler) =>
-        new(handler ?? new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), ConnectTimeout = TimeSpan.FromSeconds(10) }, disposeHandler: handler is null)
+        new(new LoggingHandler(handler ?? new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5), ConnectTimeout = TimeSpan.FromSeconds(10) }), disposeHandler: handler is null)
         { Timeout = TimeSpan.FromSeconds(30) };
+
+    /// <summary>Approximate duration of a 16-bit mono WAV.</summary>
+    public static double Seconds(byte[] wav, int rate = 16000) => Math.Max(0, wav.Length - 44) / (rate * 2.0);
 
     public const string Vocabulary = "VoxStride, VoxStride execute, Notepad, Notepad++, YouTube, ChatGPT, desktop, Downloads, temp files, C drive";
 }
@@ -51,13 +55,20 @@ public sealed class OpenAITranscriber(string apiKey, string model = "gpt-transcr
         {
             using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
             var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            if (!resp.IsSuccessStatusCode) return new TranscriptionResult(false, "", $"{(int)resp.StatusCode}: {ProviderBase.SafeErrorMessage(body)}");
+            if (!resp.IsSuccessStatusCode)
+            {
+                Log.Warn("speech", $"{Name} transcription HTTP {(int)resp.StatusCode} body={(body.Length > 600 ? body[..600] : body)}");
+                return new TranscriptionResult(false, "", $"{(int)resp.StatusCode}: {ProviderBase.SafeErrorMessage(body)}");
+            }
             var n = JsonNode.Parse(body);
             var lang = n?["languages"] is JsonArray l && l.Count > 0 ? l[0]?.ToString() : null;
-            return new TranscriptionResult(true, (n?["text"]?.GetValue<string>() ?? "").Trim(), null, lang);
+            var result = (n?["text"]?.GetValue<string>() ?? "").Trim();
+            Log.Info("speech", $"{Name} transcribed audio={SpeechHttp.Seconds(wav):0.0}s lang={lang ?? "?"} text={Log.Text(result)}");
+            return new TranscriptionResult(true, result, null, lang);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {
+            Log.Warn("speech", $"{Name} transcription network problem", ex);
             return new TranscriptionResult(false, "", "Network problem: " + ex.Message);
         }
     }
@@ -93,16 +104,23 @@ public sealed class GeminiTranscriber(string apiKey, string model, Uri? baseUri 
         {
             using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
             var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            if (!resp.IsSuccessStatusCode) return new TranscriptionResult(false, "", $"{(int)resp.StatusCode}: {ProviderBase.SafeErrorMessage(text)}");
+            if (!resp.IsSuccessStatusCode)
+            {
+                Log.Warn("speech", $"{Name} transcription HTTP {(int)resp.StatusCode} body={(text.Length > 600 ? text[..600] : text)}");
+                return new TranscriptionResult(false, "", $"{(int)resp.StatusCode}: {ProviderBase.SafeErrorMessage(text)}");
+            }
             var parts = JsonNode.Parse(text)?["candidates"]?[0]?["content"]?["parts"] as JsonArray;
             var sb = new StringBuilder();
             if (parts is not null)
                 foreach (var p in parts)
                     if (p?["thought"]?.GetValue<bool>() != true && p?["text"] is JsonValue t) sb.Append(t.GetValue<string>());
-            return new TranscriptionResult(true, sb.ToString().Trim().Trim('"'));
+            var transcript = sb.ToString().Trim().Trim('"');
+            Log.Info("speech", $"{Name} transcribed audio={SpeechHttp.Seconds(wav):0.0}s text={Log.Text(transcript)}");
+            return new TranscriptionResult(true, transcript);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {
+            Log.Warn("speech", $"{Name} transcription network problem", ex);
             return new TranscriptionResult(false, "", "Network problem: " + ex.Message);
         }
     }
@@ -131,9 +149,17 @@ public sealed class OpenAIVoice(string apiKey, string voice = "marin", string mo
         try
         {
             using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
-            if (!resp.IsSuccessStatusCode) return null;
-            return await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var err = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                Log.Warn("tts", $"OpenAI voice {voice} HTTP {(int)resp.StatusCode} body={(err.Length > 600 ? err[..600] : err)} (falling back to the Windows voice)");
+                return null;
+            }
+            var audio = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+            Log.Debug("tts", $"OpenAI voice {voice} synthesized {SpeechHttp.Seconds(audio, 24000):0.0}s for {text.Length} chars");
+            return audio;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { return null; }
+        catch (TaskCanceledException) when (ct.IsCancellationRequested) { Log.Debug("tts", "cloud voice cancelled (interrupted or slow)"); return null; }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { Log.Warn("tts", "cloud voice network problem (falling back to the Windows voice)", ex); return null; }
     }
 }

@@ -78,7 +78,7 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer, ISpeechDiagnost
         _culture = culture;
         _controlPhrases = controlPhrases;
         _mic = microphone;
-        _log = log;
+        _log = log ?? (m => Log.Info("speech", m));
         _mic.DeviceError += m => { if (_active is not null) Error?.Invoke(m); };
     }
 
@@ -149,11 +149,13 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer, ISpeechDiagnost
         engine.EndSilenceTimeoutAmbiguous = TimeSpan.FromMilliseconds(1000);
         engine.BabbleTimeout = TimeSpan.Zero;
         engine.InitialSilenceTimeout = TimeSpan.Zero;
-        engine.SpeechDetected += (_, e) => { lock (_gate) { _segment++; _revision = 0; _segmentStartMs = (long)e.AudioPosition.TotalMilliseconds; } };
+        engine.SpeechDetected += (_, e) => { lock (_gate) { _segment++; _revision = 0; _segmentStartMs = (long)e.AudioPosition.TotalMilliseconds; } Log.Debug("speech", $"offline engine detected speech at {e.AudioPosition.TotalMilliseconds:0} ms"); };
+        engine.AudioSignalProblemOccurred += (_, e) => Log.Debug("speech", $"offline engine audio signal: {e.AudioSignalProblem} level={e.AudioLevel}");
         engine.SpeechHypothesized += (_, e) => { if (_engineRun is { } r) Interlocked.Increment(ref r.Hypotheses); Emit(e.Result.Text, false, e.Result.Confidence, e.Result.Audio); };
         engine.SpeechRecognized += (_, e) =>
         {
             if (_engineRun is { } r) Interlocked.Increment(ref r.Finals);
+            Log.Debug("speech", $"offline engine recognized grammar={e.Result.Grammar?.Name} conf={e.Result.Confidence:0.00} alternates={e.Result.Alternates.Count}");
             Emit(e.Result.Text, true, e.Result.Confidence, e.Result.Audio);
         };
         engine.SpeechRecognitionRejected += (_, e) =>
@@ -162,6 +164,7 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer, ISpeechDiagnost
             // control detection treats low confidence as uncertain and never commits on it.
             if (_engineRun is { } r) Interlocked.Increment(ref r.Rejected);
             var alt = e.Result.Alternates.FirstOrDefault();
+            Log.Info("speech", $"offline engine rejected audio (unsure) best guess={Log.Text(alt?.Text ?? "")} conf={(alt?.Confidence ?? 0):0.00}");
             Emit(alt?.Text ?? "", true, alt?.Confidence ?? 0, e.Result.Audio);
         };
         engine.RecognizeCompleted += (sender, e) =>
@@ -306,7 +309,7 @@ public sealed class WindowsWakeWordDetector : IWakeWordDetector
     {
         _culture = culture;
         _mic = microphone;
-        _log = log;
+        _log = log ?? (m => Log.Info("wake", m));
     }
 
     public bool IsListening { get { lock (_gate) return _lease is not null; } }
@@ -349,6 +352,7 @@ public sealed class WindowsWakeWordDetector : IWakeWordDetector
         _recognizing = true;
         _lease = lease;
         _pipe = pipe;
+        _log?.Invoke($"wake listening device=\"{lease.DeviceLabel}\" threshold={MinConfidence:0.00}");
     }
 
     private SpeechRecognitionEngine EnsureEngine()
@@ -362,10 +366,11 @@ public sealed class WindowsWakeWordDetector : IWakeWordDetector
         engine.LoadGrammar(new Grammar(wakeWithText) { Name = "wake+dictation", Weight = 0.8f });
         engine.SpeechRecognized += (_, e) =>
         {
-            if (e.Result.Confidence < MinConfidence) return;
+            // Near misses are logged so the wake threshold can be tuned for the user's accent.
+            if (e.Result.Confidence < MinConfidence) { Log.Info("wake", $"wake candidate rejected: confidence {e.Result.Confidence:0.00} < {MinConfidence:0.00} words={e.Result.Words.Count} (standby audio is never written to the log)"); return; }
             var words = e.Result.Words;
             var wakeIdx = words.Count > 1 && words[1].Text.Equals("vox", StringComparison.OrdinalIgnoreCase) ? 3 : 2;
-            if (words.Take(wakeIdx).Any(w => w.Confidence < MinConfidence * 0.8f)) return;
+            if (words.Take(wakeIdx).Any(w => w.Confidence < MinConfidence * 0.8f)) { Log.Info("wake", $"wake candidate rejected: a wake word was unclear (word confidences {string.Join(" ", words.Take(wakeIdx).Select(w => w.Confidence.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)))})"); return; }
             _log?.Invoke($"wake-detected confidence={e.Result.Confidence:0.00}");
             WakeDetected?.Invoke(DateTimeOffset.UtcNow);
             if (words.Count > wakeIdx) TrailingText?.Invoke(string.Join(' ', words.Skip(wakeIdx).Select(w => w.Text)));
@@ -414,6 +419,7 @@ public sealed class WindowsWakeWordDetector : IWakeWordDetector
         {
             _wanted = false;
             if (_lease is null) return Task.CompletedTask;
+            _log?.Invoke($"wake stopped after {_lease.Elapsed.TotalSeconds:0}s buffers={_lease.Buffers} peak={_lease.Peak:0}");
             ReleaseCore(); // the microphone lease is released immediately, whatever the engine does
             engine = _engine;
         }
@@ -473,7 +479,16 @@ public sealed class WindowsSpeechSynthesizer : ISpeechSynthesizer, IDisposable
         if (!Enabled || string.IsNullOrWhiteSpace(text)) return Task.CompletedTask;
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var prompt = new Prompt(text);
-        void Done(object? s, SpeakCompletedEventArgs e) { if (e.Prompt == prompt) { _synth.SpeakCompleted -= Done; tcs.TrySetResult(); } }
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        Log.Debug("tts", $"windows voice \"{_synth.Voice?.Name}\" speaking {text.Length} chars");
+        void Done(object? s, SpeakCompletedEventArgs e)
+        {
+            if (e.Prompt != prompt) return;
+            _synth.SpeakCompleted -= Done;
+            if (e.Error is not null) Log.Warn("tts", "windows voice failed", e.Error);
+            else Log.Debug("tts", $"windows voice {(e.Cancelled ? "interrupted" : "finished")} after {sw.ElapsedMilliseconds} ms");
+            tcs.TrySetResult();
+        }
         _synth.SpeakCompleted += Done;
         _synth.SpeakAsync(prompt);
         ct.Register(() => { try { _synth.SpeakAsyncCancel(prompt); } catch (Exception) { } tcs.TrySetResult(); });

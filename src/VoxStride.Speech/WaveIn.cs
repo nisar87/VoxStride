@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using VoxStride.Contracts;
 using VoxStride.Core.Voice;
 
 namespace VoxStride.Speech;
@@ -125,6 +126,7 @@ public sealed class WaveInRecorder : IAudioCaptureDevice
             var rc = waveInOpen(out _handle, DeviceArg(DeviceId), ref fmt, _signal.SafeWaitHandle.DangerousGetHandle(), 0, CALLBACK_EVENT);
             if (rc != 0)
             {
+                Log.Warn("mic", $"waveInOpen failed device={DeviceId} \"{Label}\" code={rc}");
                 _signal.Dispose(); _signal = null; _handle = 0;
                 throw new InvalidOperationException(rc switch
                 {
@@ -183,6 +185,7 @@ public sealed class WaveInRecorder : IAudioCaptureDevice
 
     private void ReportError(string message)
     {
+        Log.Warn("mic", $"capture problem on \"{Label}\": {message}");
         if (_errorReported) return;
         _errorReported = true;
         Error?.Invoke(message);
@@ -248,13 +251,22 @@ internal sealed class MicWatchdog : IDisposable
         if (_lease.Buffers == 0 && _lease.Elapsed >= NoAudioAfter)
         {
             if (Finish())
+            {
+                Log.Warn("mic", $"watchdog: no audio buffers from \"{_lease.DeviceLabel}\" after {_lease.Elapsed.TotalSeconds:0.0}s ({_lease.Purpose})");
                 _error($"\"{_lease.DeviceLabel}\" is open but isn't sending any audio. Another app may be using it exclusively, or it was disconnected. Pick another microphone in Voice settings, or type your instruction");
+            }
             return;
         }
         switch (_lease.Health(SilenceHintAfter))
         {
             case MicHealth.Ok: Finish(); break;
-            case MicHealth.Silent: if (Finish()) _hint(SilenceAdvice(_lease.DeviceLabel)); break;
+            case MicHealth.Silent:
+                if (Finish())
+                {
+                    Log.Info("mic", $"watchdog: only silence from \"{_lease.DeviceLabel}\" for {_lease.Elapsed.TotalSeconds:0}s buffers={_lease.Buffers} peak={_lease.Peak:0}");
+                    _hint(SilenceAdvice(_lease.DeviceLabel));
+                }
+                break;
         }
     }
 
@@ -271,7 +283,9 @@ internal sealed class MicWatchdog : IDisposable
     {
         try
         {
-            var alive = WaveInRecorder.ProbeAll(TimeSpan.FromMilliseconds(1200))
+            var probe = WaveInRecorder.ProbeAll(TimeSpan.FromMilliseconds(1200));
+            Log.Info("mic", "probe all microphones: " + string.Join(", ", probe.Select(p => $"\"{p.Name}\" peak={p.Peak:0}")));
+            var alive = probe
                 .Where(p => p.Peak >= MicHealthCheck.SilenceThreshold && !activeLabel.Contains(p.Name, StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(p => p.Peak).Select(p => p.Name).ToList();
             if (alive.Count > 0)

@@ -66,8 +66,16 @@ public sealed class ToolBroker(
         ToolValidation validation;
         try { validation = await tool.ValidateAsync(request.Arguments, ctx, ct); }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { return await BlockAsync(request, auth, "validation_error", ex.GetType().Name, ct); }
-        if (!validation.Ok) return Finish(ToolResult.Fail(validation.ErrorCode ?? "invalid", validation.Message ?? "Invalid request."), sw);
+        catch (Exception ex)
+        {
+            Log.Error("tool", $"{request.StepId} {request.ToolName} validation threw", ex);
+            return await BlockAsync(request, auth, "validation_error", ex.GetType().Name, ct);
+        }
+        if (!validation.Ok)
+        {
+            Log.Warn("tool", $"{request.StepId} {request.ToolName} validation failed code={validation.ErrorCode ?? "invalid"} message={validation.Message}");
+            return Finish(ToolResult.Fail(validation.ErrorCode ?? "invalid", validation.Message ?? "Invalid request."), sw);
+        }
 
         // Local risk policy: Moderate/High mutating tools require manifest-bound approval unless a narrow standing rule covers it.
         var needsApproval = validation.ApprovalNeeded is not null ||
@@ -81,12 +89,16 @@ public sealed class ToolBroker(
             if (req.Operation == StandingRuleOperations.ReversibleSameRootMove && req.Risk <= RiskTier.Moderate && standingRules.Covers(req, out var ruleId))
             {
                 ctx.Approval = new Approval(Guid.NewGuid(), auth.RunId, req.ManifestDigest, req.Operation, time.GetUtcNow().AddMinutes(5), "standing-rule:" + ruleId);
+                Log.Info("tool", $"{request.StepId} {request.ToolName} approved by standing rule {ruleId} op={req.Operation} risk={req.Risk}");
                 events.Publish(auth.RunId, AgentState.Executing, "approval", $"Covered by your saved rule: {req.Title}", request.StepId);
             }
             else
             {
                 events.Publish(auth.RunId, AgentState.AwaitingApproval, "approval", req.Title, request.StepId);
+                Log.Info("tool", $"{request.StepId} {request.ToolName} waiting for approval op={req.Operation} risk={req.Risk} title={Log.Text(req.Title, 200)}");
+                var waitSw = Stopwatch.StartNew();
                 var approval = await approvals.RequestAsync(req, ct);
+                Log.Info("tool", $"{request.StepId} {request.ToolName} approval {(approval is null ? "declined/expired" : "granted")} after {waitSw.Elapsed.TotalSeconds:0.0}s");
                 if (approval is null) return await BlockAsync(request, auth, "approval_declined", "You declined or the approval expired. Nothing was changed.", ct, logBlocked: false);
                 if (approval.RunId != auth.RunId || approval.ManifestDigest != req.ManifestDigest || approval.Operation != req.Operation || approval.ExpiresAt < time.GetUtcNow())
                     return await BlockAsync(request, auth, "approval_mismatch", "Approval does not match the exact manifest.", ct);
@@ -108,6 +120,7 @@ public sealed class ToolBroker(
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested && timeout.IsCancellationRequested)
         {
+            Log.Warn("tool", $"{request.StepId} {request.ToolName} timed out after {DefaultToolTimeout.TotalSeconds:0}s");
             result = new ToolResult(tool.Definition.Mutates ? ToolOutcome.Unknown : ToolOutcome.Failure, null, "timeout", "The operation timed out; its effect will be reconciled, not retried.", false, !tool.Definition.Mutates, [], null, sw.Elapsed);
         }
         catch (OperationCanceledException)
@@ -116,6 +129,7 @@ public sealed class ToolBroker(
         }
         catch (Exception ex)
         {
+            Log.Error("tool", $"{request.StepId} {request.ToolName} threw", ex);
             result = new ToolResult(tool.Definition.Mutates ? ToolOutcome.Unknown : ToolOutcome.Failure, null, "tool_exception", ex.GetType().Name + ": " + ex.Message, false, false, [], null, sw.Elapsed);
         }
 
@@ -124,10 +138,12 @@ public sealed class ToolBroker(
             try
             {
                 var v = await tool.VerifyAsync(request.Arguments, result, ctx, CancellationToken.None);
+                Log.Write(v.Verified ? LogLevel.Debug : LogLevel.Warn, "tool", $"{request.StepId} {request.ToolName} verify verified={v.Verified} outcome={v.Outcome} message={Log.Text(v.Message ?? "", 200)}", null);
                 result = result with { Verified = v.Verified, Outcome = v.Outcome, Message = v.Message ?? result.Message };
             }
             catch (Exception ex)
             {
+                Log.Error("tool", $"{request.StepId} {request.ToolName} verification threw", ex);
                 result = result with { Verified = false, Outcome = ToolOutcome.Unknown, Message = "Verification failed: " + ex.GetType().Name };
             }
         }
@@ -146,6 +162,7 @@ public sealed class ToolBroker(
 
     private async Task<ToolResult> BlockAsync(ToolRequest req, RunAuthorization? auth, string code, string message, CancellationToken ct, bool logBlocked = true)
     {
+        Log.Warn("tool", $"{req.StepId} {req.ToolName} BLOCKED code={code} reason={message}");
         if (logBlocked) Blocked?.Invoke(req.ToolName, code);
         await journal.RecordAsync(new JournalEntry(Guid.NewGuid(), auth?.RunId ?? Guid.Empty, req.StepId, req.IdempotencyKey, req.ToolName, "{}", JournalStatus.Blocked, code, time.GetUtcNow()), CancellationToken.None);
         return ToolResult.Fail(code, message);
