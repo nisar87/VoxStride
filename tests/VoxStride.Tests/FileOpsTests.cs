@@ -217,3 +217,22 @@ public sealed class FileOpsTests : IDisposable
         Assert.True(File.Exists(a));
     }
 }
+
+public sealed class UserPermissionsTests
+{
+    [Theory]
+    [InlineData("facebook.com", "https://m.facebook.com/x", false)]
+    [InlineData("https://www.Facebook.com/home", "https://facebook.com", false)]
+    [InlineData("facebook.com", "https://notfacebook.com", true)]
+    [InlineData("", "https://example.com", true)]
+    public void SitesBlockByDomainAndSubdomain(string blocked, string url, bool allowed) =>
+        Assert.Equal(allowed, new VoxStride.Core.Policy.UserPermissions(blockedSites: () => [blocked]).SiteAllowed(new Uri(url), out _));
+
+    [Theory]
+    [InlineData("Steam", "Steam", @"C:\Program Files\Steam\steam.exe", false)]
+    [InlineData("steam.exe", "Steam Client", @"C:\x\steam.exe", false)]
+    [InlineData("Word", "WordPad", @"C:\x\wordpad.exe", false)]
+    [InlineData("Paint", "Notepad", @"C:\x\notepad.exe", true)]
+    public void AppsBlockByNameOrExe(string blocked, string name, string target, bool allowed) =>
+        Assert.Equal(allowed, new VoxStride.Core.Policy.UserPermissions(blockedApps: () => [blocked]).AppAllowed(name, target, out _));
+}

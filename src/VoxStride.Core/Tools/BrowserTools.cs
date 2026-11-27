@@ -60,16 +60,21 @@ public static class VideoLayout
     }
 }
 
-public sealed class BrowserOpenUrlTool(IBrowserController browser) : ToolBase
+public sealed class BrowserOpenUrlTool(IBrowserController browser, VoxStride.Core.Policy.UserPermissions? permissions = null) : ToolBase
 {
     public override ToolDefinition Definition { get; } = new(
         "browser_open_url", "Open an https URL in VoxStride's visible browser window.",
         Schema.Object(("url", Schema.Str("Absolute https URL", "^https://[^\\s]{3,2000}$", 2048), true)),
         RiskTier.LowReversible, true);
 
-    public override ValueTask<ToolValidation> ValidateAsync(JsonObject args, ToolContext ctx, CancellationToken ct) =>
-        ValueTask.FromResult(Uri.TryCreate(Str(args, "url"), UriKind.Absolute, out var u) && u.Scheme == Uri.UriSchemeHttps && !u.IsLoopback && u.HostNameType == UriHostNameType.Dns
-            ? ToolValidation.Valid() : ToolValidation.Invalid("bad_url", "Only public https addresses can be opened."));
+    public override ValueTask<ToolValidation> ValidateAsync(JsonObject args, ToolContext ctx, CancellationToken ct)
+    {
+        if (!(Uri.TryCreate(Str(args, "url"), UriKind.Absolute, out var u) && u.Scheme == Uri.UriSchemeHttps && !u.IsLoopback && u.HostNameType == UriHostNameType.Dns))
+            return ValueTask.FromResult(ToolValidation.Invalid("bad_url", "Only public https addresses can be opened."));
+        if (!(permissions ?? VoxStride.Core.Policy.UserPermissions.Default).SiteAllowed(u, out var why))
+            return ValueTask.FromResult(ToolValidation.Invalid("site_blocked_by_user", why));
+        return ValueTask.FromResult(ToolValidation.Valid());
+    }
 
     public override async ValueTask<ToolResult> ExecuteAsync(JsonObject args, ToolContext ctx, CancellationToken ct)
     {

@@ -32,7 +32,7 @@ public partial class MainWindow : Window
         DataContext = vm;
         _pages = [HomePage, HistoryPage, ProvidersPage, VoicePage, PrivacyPage, AboutPage];
         Nav.SelectedIndex = 0;
-        WelcomePanel.Visibility = app.Settings.FirstRunCompleted ? Visibility.Collapsed : Visibility.Visible;
+        WelcomePanel.Visibility = Visibility.Collapsed; // first run uses the setup wizard
         Loaded += (_, _) => { LoadSettingsIntoUi(); CommandBox.Focus(); };
         app.UpdateStateChanged += () => Dispatcher.BeginInvoke(RefreshUpdateUi);
     }
@@ -55,6 +55,11 @@ public partial class MainWindow : Window
     }
 
     public void ShowPage(int index) { Nav.SelectedIndex = index; }
+
+    /// <summary>Re-reads settings into every page (after the setup wizard).</summary>
+    public void ReloadSettings() => LoadSettingsIntoUi();
+
+    private void RunSetup_Click(object sender, RoutedEventArgs e) => _app.ShowSetup();
 
     // ---------- Home ----------
     private void Welcome_Continue(object sender, RoutedEventArgs e) => CompleteWelcome(ConsentBox.IsChecked == true);
@@ -199,6 +204,13 @@ public partial class MainWindow : Window
         AutoUpdateBox.IsChecked = s.AutoCheckUpdates;
         AutoInstallBox.IsChecked = s.AutoInstallUpdates;
         RefreshUpdateUi();
+        FolderPermChecks.Children.Clear();
+        foreach (var f in VoxStride.Core.Tools.FileScope.DefaultFolders)
+            FolderPermChecks.Children.Add(new CheckBox { Content = f.ToString(), Tag = f.ToString(), Margin = new Thickness(0, 3, 16, 3), IsChecked = !s.DisabledKnownFolders.Contains(f.ToString(), StringComparer.OrdinalIgnoreCase) });
+        ExtraFoldersList.ItemsSource = s.AllowedFolders.ToList();
+        BlockedAppsBox.Text = string.Join(Environment.NewLine, s.BlockedApps);
+        BlockedSitesBox.Text = string.Join(Environment.NewLine, s.BlockedSites);
+        NeverScreenshotBox.IsChecked = s.ScreenCapture == VoxStride.Core.Policy.ScreenCapturePolicy.Never;
         MicConsentBox.IsChecked = s.MicrophoneConsent; RetainBox.IsChecked = s.RetainTranscripts; StartupBox.IsChecked = s.LaunchAtLogon; LogTextBox.IsChecked = s.LogConversationText;
         _app.RefreshProviderLabel();
     }
@@ -433,6 +445,30 @@ public partial class MainWindow : Window
     }
 
     // ---------- Privacy ----------
+    private static List<string> Lines(string text) =>
+        text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    private void AddFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Allow VoxStride to use this folder", Multiselect = false };
+        if (dlg.ShowDialog(this) != true) return;
+        var path = dlg.FolderName;
+        if (VoxStride.Core.Policy.PathPolicy.IsProtectedLocation(path) || path.Length <= 3)
+        {
+            _vm.AddActivity("That location can't be allowed (system folders and whole drives are always off-limits).", "!");
+            return;
+        }
+        var list = ExtraFoldersList.Items.OfType<string>().ToList();
+        if (!list.Contains(path, StringComparer.OrdinalIgnoreCase)) list.Add(path);
+        ExtraFoldersList.ItemsSource = list;
+    }
+
+    private void RemoveFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (ExtraFoldersList.SelectedItem is not string sel) return;
+        ExtraFoldersList.ItemsSource = ExtraFoldersList.Items.OfType<string>().Where(x => x != sel).ToList();
+    }
+
     private async void SavePrivacy_Click(object sender, RoutedEventArgs e)
     {
         var s = _app.Settings;
@@ -442,6 +478,11 @@ public partial class MainWindow : Window
         s.LaunchAtLogon = StartupBox.IsChecked == true;
         s.LogConversationText = LogTextBox.IsChecked == true;
         Log.IncludeContent = s.LogConversationText;
+        s.DisabledKnownFolders = FolderPermChecks.Children.OfType<CheckBox>().Where(c => c.IsChecked != true).Select(c => (string)c.Tag).ToList();
+        s.AllowedFolders = ExtraFoldersList.Items.OfType<string>().ToList();
+        s.BlockedApps = Lines(BlockedAppsBox.Text);
+        s.BlockedSites = Lines(BlockedSitesBox.Text).Select(VoxStride.Core.Policy.UserPermissions.Normalize).Where(x => x.Length > 0).Distinct().ToList();
+        s.ScreenCapture = NeverScreenshotBox.IsChecked == true ? VoxStride.Core.Policy.ScreenCapturePolicy.Never : VoxStride.Core.Policy.ScreenCapturePolicy.AskEachTime;
         s.Save();
         _app.Host!.Store.RetainTranscripts = s.RetainTranscripts;
         _app.Host.ApplyStartup(s.LaunchAtLogon);

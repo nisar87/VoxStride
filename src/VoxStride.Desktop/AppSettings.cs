@@ -64,6 +64,12 @@ public sealed class AppSettings
     /// <summary>Opt-in natural mode: a pause ends the turn, but such turns may only read and answer (changes still need "VoxStride, execute").</summary>
     public bool NaturalMode { get; set; }
     public double NaturalPauseSeconds { get; set; } = 1.5;
+    /// <summary>Apps VoxStride must never open or control (names or exe names).</summary>
+    public List<string> BlockedApps { get; set; } = [];
+    /// <summary>Websites VoxStride must never visit (domains; subdomains included).</summary>
+    public List<string> BlockedSites { get; set; } = [];
+    /// <summary>Window screenshots for the vision fallback: ask each time (default) or never.</summary>
+    public VoxStride.Core.Policy.ScreenCapturePolicy ScreenCapture { get; set; } = VoxStride.Core.Policy.ScreenCapturePolicy.AskEachTime;
     /// <summary>Extra folders (absolute paths) the file tools may use, in addition to the default known folders.</summary>
     public List<string> AllowedFolders { get; set; } = [];
     /// <summary>Default known folders the user switched off (e.g. "Pictures").</summary>

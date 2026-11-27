@@ -82,6 +82,7 @@ public partial class App : Application
 
         var background = e.Args.Contains("--background") && Settings.FirstRunCompleted;
         if (!background) _main.Show();
+        if (!Settings.FirstRunCompleted) _ = Dispatcher.BeginInvoke(ShowSetup); // after startup finishes, never blocking it
         if (e.Args.Contains("--updated")) _vm.AddActivity($"VoxStride was updated to version {UpdateService.CurrentVersion.ToString(3)}.", "✔");
         if (Settings.ActiveProvider is not null && !Settings.CloudSpeechConsent && Settings.MicrophoneConsent)
             _vm.AddActivity("Tip: turn on Cloud speech in Voice settings — it understands accents and mixed Urdu/English much better.");
@@ -311,6 +312,22 @@ public partial class App : Application
             Host.Conversation.PressProceed();
         };
         _holdTimer.Start();
+    }
+
+    /// <summary>Opens the 4-step setup (first run, or Settings › Run setup again).</summary>
+    public void ShowSetup()
+    {
+        var w = new SetupWizard(this) { Owner = _main?.IsVisible == true ? _main : null };
+        w.ShowDialog();
+        _main?.ReloadSettings();
+    }
+
+    /// <summary>Keeps the tray/overlay mute state in step with the microphone choice made in setup.</summary>
+    public void SetMutedFromSetup(bool muted)
+    {
+        _muted = muted;
+        _overlay?.SetMuted(muted);
+        if (_tray is not null) _tray.Text = muted ? "VoxStride (muted)" : "VoxStride";
     }
 
     public void ToggleMute()

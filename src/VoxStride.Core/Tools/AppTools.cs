@@ -26,7 +26,7 @@ public interface IAppController
     Task<bool> IsAliveAsync(WindowIdentity window, CancellationToken ct);
 }
 
-public sealed class LaunchAppTool(IAppCatalog catalog, IAppController controller) : ToolBase
+public sealed class LaunchAppTool(IAppCatalog catalog, IAppController controller, VoxStride.Core.Policy.UserPermissions? permissions = null) : ToolBase
 {
     public override ToolDefinition Definition { get; } = new(
         "apps_launch",
@@ -41,6 +41,8 @@ public sealed class LaunchAppTool(IAppCatalog catalog, IAppController controller
             return ValueTask.FromResult(r.Candidates.Count > 0
                 ? ToolValidation.Invalid("ambiguous_app", "Which one: " + string.Join(", ", r.Candidates.Take(5).Select(c => c.DisplayName)) + "?")
                 : ToolValidation.Invalid("app_not_found", catalog.IsReady ? $"I couldn't find an app called {Str(args, "name")} on this PC." : "The app list is still loading. Try again in a moment."));
+        if (!(permissions ?? VoxStride.Core.Policy.UserPermissions.Default).AppAllowed(r.App.DisplayName, r.App.LaunchTarget, out var why))
+            return ValueTask.FromResult(ToolValidation.Invalid("app_blocked_by_user", why));
         ctx.Items["app"] = r.App;
         return ValueTask.FromResult(ToolValidation.Valid());
     }

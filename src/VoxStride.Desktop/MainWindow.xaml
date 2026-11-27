@@ -258,6 +258,20 @@
                     <CheckBox x:Name="MicConsentBox" Content="Allow microphone (wake word and dictation)" Margin="0,4" />
                     <CheckBox x:Name="RetainBox" Content="Keep my instruction text in History (off: only results are kept)" Margin="0,4" />
                     <CheckBox x:Name="StartupBox" Content="Start VoxStride when I sign in" Margin="0,4" />
+                    <TextBlock Text="Permissions" FontWeight="SemiBold" FontSize="15" Margin="0,14,0,4" />
+                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,6"
+                               Text="Folders VoxStride's file tools may use. Windows, Program Files, hidden and system items are always off-limits." />
+                    <WrapPanel x:Name="FolderPermChecks" />
+                    <ListBox x:Name="ExtraFoldersList" Height="70" Margin="0,6,0,4" AutomationProperties.Name="Extra allowed folders" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="Add folder…" Style="{StaticResource PlainButton}" Click="AddFolder_Click" />
+                        <Button Content="Remove selected" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="RemoveFolder_Click" />
+                    </StackPanel>
+                    <TextBlock Text="Apps VoxStride must never open (one per line, name or .exe)" Margin="0,4,0,2" />
+                    <TextBox x:Name="BlockedAppsBox" AcceptsReturn="True" Height="60" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Blocked apps" />
+                    <TextBlock Text="Websites VoxStride must never visit (one per line, e.g. example.com)" Margin="0,8,0,2" />
+                    <TextBox x:Name="BlockedSitesBox" AcceptsReturn="True" Height="60" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Blocked websites" />
+                    <CheckBox x:Name="NeverScreenshotBox" Content="Never take window screenshots (otherwise VoxStride asks each time it needs one)" Margin="0,8,0,4" />
                     <CheckBox x:Name="LogTextBox" Content="Include what I say and VoxStride's replies in the diagnostics log (kept only on this PC; helps fix recognition problems)" Margin="0,4" />
                     <Button Content="Save" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Margin="0,10,0,18" Click="SavePrivacy_Click" />
                     <TextBlock Text="Saved permissions" FontWeight="SemiBold" />
@@ -298,6 +312,7 @@
                     <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                         <Button Content="Refresh" Style="{StaticResource PlainButton}" Click="RefreshDiagnostics_Click" />
                         <Button Content="Open log folder" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="OpenLogs_Click" />
+                        <Button Content="Run setup again" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="RunSetup_Click" />
                         <Button Content="Save diagnostics report" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="Export_Click" ToolTip="A zip with the logs, PC/settings summary and run history (no keys, audio or files) to send for troubleshooting" />
                     </StackPanel>
                 </StackPanel>

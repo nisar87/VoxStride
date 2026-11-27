@@ -11,6 +11,7 @@ using VoxStride.Core.Agent;
 using VoxStride.Core.Events;
 using VoxStride.Core.Execution;
 using VoxStride.Core.Files;
+using VoxStride.Core.Policy;
 using VoxStride.Core.Routing;
 using VoxStride.Core.Tools;
 using VoxStride.Core.Voice;
@@ -111,6 +112,8 @@ public sealed class AppHost : IAsyncDisposable
     public FileToolServices FileServices { get; }
     /// <summary>Folders the general file tools may use (Settings › Permissions).</summary>
     public FileScope Scope { get; }
+    /// <summary>The user's blocked apps/sites and screen-capture choice (Settings › Permissions).</summary>
+    public UserPermissions Permissions { get; }
     public IUserApproval Approvals { get; }
 
     public AppHost(AppSettings settings, IUserApproval approvals, bool enableSpeech)
@@ -125,6 +128,7 @@ public sealed class AppHost : IAsyncDisposable
         Browser = new PlaywrightBrowserController();
         var controller = new WindowsAppController();
 
+        Permissions = new UserPermissions(() => settings.BlockedApps, () => settings.BlockedSites, () => settings.ScreenCapture);
         Scope = new FileScope(new WindowsKnownFolders(), () => settings.AllowedFolders,
             () => settings.DisabledKnownFolders.Select(n => Enum.TryParse<KnownFolder>(n, true, out var k) ? (KnownFolder?)k : null).OfType<KnownFolder>().ToList());
         Registry
@@ -133,9 +137,9 @@ public sealed class AppHost : IAsyncDisposable
             .Add(new GetFreeSpaceTool(drives)).Add(new ListDrivesTool(drives))
             .Add(new PreviewOrganizationTool(FileServices)).Add(new ApplyOrganizationTool(FileServices)).Add(new UndoOrganizationTool(FileServices))
             .Add(new PreviewTempCleanupTool(FileServices)).Add(new ApplyTempCleanupTool(FileServices))
-            .Add(new LaunchAppTool(Apps, controller)).Add(new ListAppsTool(Apps))
+            .Add(new LaunchAppTool(Apps, controller, Permissions)).Add(new ListAppsTool(Apps))
             .Add(new EditorWriteTool(new WindowsEditorAdapter(Apps), Apps))
-            .Add(new BrowserOpenUrlTool(Browser)).Add(new YouTubePlayTool(Browser)).Add(new ChatGptDraftTool(Browser));
+            .Add(new BrowserOpenUrlTool(Browser, Permissions)).Add(new YouTubePlayTool(Browser)).Add(new ChatGptDraftTool(Browser));
 
         Broker = new ToolBroker(Registry, Authority, Store, approvals, Rules, Events, time);
         Providers = new ProviderSelector(settings, Secrets, Store);
@@ -256,6 +260,29 @@ public sealed class AppHost : IAsyncDisposable
             return new SpeechTestResult(engine, meter.DeviceLabel, meter.Buffers, meter.Peak, result, problems);
         }
         finally { _ = StartWakeAsync(); }
+    }
+
+    /// <summary>Setup check: listens for "Hey VoxStride" for a few seconds on the chosen microphone; returns whether it was heard.</summary>
+    public async Task<bool> TestWakeAsync(TimeSpan timeout, CancellationToken ct)
+    {
+        await StopWakeAsync();
+        var heard = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var w = new WindowsWakeWordDetector(Settings.SpeechCulture, Microphone);
+        w.WakeDetected += _ => heard.TrySetResult(true);
+        try
+        {
+            await w.StartAsync(ct);
+            var done = await Task.WhenAny(heard.Task, Task.Delay(timeout, ct));
+            var ok = done == heard.Task;
+            Log.Info("wake", $"wake test {(ok ? "heard the wake phrase" : "timed out")}");
+            return ok;
+        }
+        finally
+        {
+            await w.StopAsync();
+            await w.DisposeAsync();
+            if (_conversationIdle) _ = StartWakeAsync();
+        }
     }
 
     /// <summary>Applies a newly chosen microphone without a restart.</summary>
