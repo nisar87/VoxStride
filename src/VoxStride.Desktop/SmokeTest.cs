@@ -44,6 +44,32 @@ public static class SmokeTest
                 ok &= pass;
                 results.Add(new { text, r.Success, r.SpokenSummary, ms = t.Elapsed.TotalMilliseconds, pass });
             }
+            // Section 11 latency: commit → verified result for a direct native command, 30 runs, p50/p95.
+            var samples = new System.Collections.Generic.List<double>();
+            for (var i = 0; i < 30; i++)
+            {
+                const string text = "how much space is left on C";
+                var cmd = new CommandEnvelope(Guid.NewGuid(), Guid.NewGuid(), text, Core.Execution.RunAuthority.HashTranscript(text), "en-US", [], DateTimeOffset.UtcNow, InputMode.Typed, null, null);
+                var t = Stopwatch.StartNew();
+                var r = await host.Runs.RunAsync(cmd, CancellationToken.None);
+                t.Stop();
+                if (r.Success) samples.Add(t.Elapsed.TotalMilliseconds);
+                if (host.Runs.LastLatency?.Between("t_commit", "t_verified") is { } v) samples[^1] = v;
+            }
+            samples.Sort();
+            double P(double q) => samples.Count == 0 ? double.NaN : samples[Math.Min(samples.Count - 1, (int)Math.Ceiling(q * samples.Count) - 1)];
+            var latency = new { runs = samples.Count, p50Ms = Math.Round(P(0.50), 1), p95Ms = Math.Round(P(0.95), 1), maxMs = Math.Round(samples.LastOrDefault(), 1), targetP95Ms = 2000 };
+            ok &= samples.Count == 30 && P(0.95) < 2000;
+
+            // Cancellation: a hard stop must take effect quickly (target 500 ms).
+            var slow = new CommandEnvelope(Guid.NewGuid(), Guid.NewGuid(), "write a long poem about rain", Core.Execution.RunAuthority.HashTranscript("write a long poem about rain"), "en-US", [], DateTimeOffset.UtcNow, InputMode.Typed, null, null);
+            var running = host.Runs.RunAsync(slow, CancellationToken.None);
+            var cancelWatch = Stopwatch.StartNew();
+            await host.Runs.CancelActiveAsync("smoke-test");
+            await running;
+            var cancelMs = Math.Round(cancelWatch.Elapsed.TotalMilliseconds, 1);
+            ok &= cancelMs < 500;
+
             // The real diagnostics file must contain the full trail of those runs.
             DiagnosticsLog.Flush(TimeSpan.FromSeconds(5));
             string logText;
@@ -72,6 +98,8 @@ public static class SmokeTest
                 apps = host.Apps.Snapshot().Count,
                 hasNotepad = host.Apps.Resolve("notepad").App is not null,
                 results,
+                latency,
+                cancelMs,
                 log = new { path = DiagnosticsLog.FilePath, bytes = logText.Length, checks = logChecks, passed = logOk },
                 status = ok ? "passed" : "failed",
             };

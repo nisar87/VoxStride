@@ -41,6 +41,21 @@ try {
   $result.smoke = $smokeJson | ConvertFrom-Json
   Step 'smoke-test' ($p.ExitCode -eq 0) "exit $($p.ExitCode)"
 
+  # Section 11 idle resources: run the installed app in the background for 60 s and measure CPU and memory.
+  $app = Start-Process -FilePath $exe -ArgumentList '--background' -PassThru
+  Start-Sleep -Seconds 20   # let startup (catalog build, first window) settle
+  $p0 = Get-Process -Id $app.Id -ErrorAction SilentlyContinue
+  $cpu0 = $p0.TotalProcessorTime.TotalSeconds
+  Start-Sleep -Seconds 60
+  $p1 = Get-Process -Id $app.Id -ErrorAction SilentlyContinue
+  $cpuPct = [math]::Round((($p1.TotalProcessorTime.TotalSeconds - $cpu0) / 60.0) / [Environment]::ProcessorCount * 100, 2)
+  $wsMb = [math]::Round($p1.WorkingSet64 / 1MB, 1)
+  $result.idle = @{ cpuPercentAvg = $cpuPct; workingSetMb = $wsMb; cores = [Environment]::ProcessorCount; seconds = 60; note = 'CI runner: no microphone, so wake-word listening is inactive' }
+  Step 'idle-cpu-below-2pct' ($cpuPct -lt 2) "$cpuPct %"
+  Step 'idle-working-set-below-180mb' ($wsMb -lt 180) "$wsMb MB"
+  Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 2
+
   $uninstaller = Join-Path $appDir 'unins000.exe'
   $p = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
   Start-Sleep -Seconds 3
