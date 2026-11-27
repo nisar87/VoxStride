@@ -207,7 +207,7 @@ public sealed class ExtensionEndToEndTests(ITestOutputHelper output)
             for (var i = 0; i < 100 && !browser.Connected; i++) await Task.Delay(200);
             if (!browser.Connected)
             {
-                output.WriteLine($"E2E-EXT: NOT VERIFIED — extension did not connect (service workers: {ctx.ServiceWorkers.Count}). The browser may not allow --load-extension on this channel.");
+                output.WriteLine($"E2E-EXT: NOT VERIFIED — extension did not connect. The browser may not allow --load-extension on this channel.");
                 Assert.Fail("extension did not connect through the native host");
             }
             output.WriteLine($"E2E-EXT: connected ({browser.BrowserVersion})");
