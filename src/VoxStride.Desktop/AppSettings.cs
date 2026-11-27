@@ -21,6 +21,8 @@ public sealed class AppSettings
     public bool PrivacyConsent { get; set; }
     public bool MicrophoneConsent { get; set; }
     public ProviderKind? ActiveProvider { get; set; }
+    /// <summary>Backup provider used when the active one is unavailable before any action ran (needs its own key).</summary>
+    public ProviderKind? FallbackProvider { get; set; }
     public Dictionary<ProviderKind, string> Models { get; set; } = new()
     {
         [ProviderKind.Claude] = ProviderFactory.DefaultModel(ProviderKind.Claude),

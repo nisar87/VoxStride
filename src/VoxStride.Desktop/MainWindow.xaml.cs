@@ -158,6 +158,8 @@ public partial class MainWindow : Window
         var s = _app.Settings;
         foreach (ComboBoxItem item in ActiveProviderBox.Items)
             if ((string)item.Tag == (s.ActiveProvider?.ToString() ?? "")) ActiveProviderBox.SelectedItem = item;
+        foreach (ComboBoxItem item in FallbackProviderBox.Items)
+            if ((string)item.Tag == (s.FallbackProvider?.ToString() ?? "")) FallbackProviderBox.SelectedItem = item;
         BuildProviderCards();
         DailyBudgetBox.Text = s.DailyTokenBudget.ToString(CultureInfo.InvariantCulture);
         RunBudgetBox.Text = s.MaxTokensPerRun.ToString(CultureInfo.InvariantCulture);
@@ -209,6 +211,14 @@ public partial class MainWindow : Window
         _app.Settings.Save();
         _app.Host!.Providers.Invalidate();
         _app.RefreshProviderLabel();
+    }
+
+    private void FallbackProvider_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (FallbackProviderBox.SelectedItem is not ComboBoxItem item || !IsLoaded) return;
+        var tag = (string)item.Tag;
+        _app.Settings.FallbackProvider = tag.Length == 0 ? null : Enum.Parse<ProviderKind>(tag);
+        _app.Settings.Save();
     }
 
     private void BuildProviderCards()

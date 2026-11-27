@@ -153,6 +153,13 @@
                         <ComboBoxItem Content="Gemini (Google)" Tag="Gemini" />
                         <ComboBoxItem Content="OpenAI" Tag="OpenAI" />
                     </ComboBox>
+                    <TextBlock Text="Backup provider (used if the active one is down before anything was done)" FontWeight="SemiBold" />
+                    <ComboBox x:Name="FallbackProviderBox" Margin="0,4,0,16" SelectionChanged="FallbackProvider_Changed" Width="260" HorizontalAlignment="Left">
+                        <ComboBoxItem Content="None" Tag="" />
+                        <ComboBoxItem Content="Claude (Anthropic)" Tag="Claude" />
+                        <ComboBoxItem Content="Gemini (Google)" Tag="Gemini" />
+                        <ComboBoxItem Content="OpenAI" Tag="OpenAI" />
+                    </ComboBox>
                     <ItemsControl x:Name="ProviderCards" />
                     <TextBlock Text="Limits" FontWeight="SemiBold" Margin="0,16,0,4" />
                     <Grid>

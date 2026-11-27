@@ -23,6 +23,8 @@ public sealed class RunOptions
 public interface IProviderSelector
 {
     IReasoningProvider? Current();
+    /// <summary>The user's backup provider, used only when <paramref name="failed"/> was unavailable before any action ran.</summary>
+    IReasoningProvider? Fallback(ProviderKind failed) => null;
 }
 
 public sealed record RunRecord(Guid RunId, CommandEnvelope Command, string Route, string? Provider, string? Model, DateTimeOffset StartedAt,
@@ -174,7 +176,19 @@ public sealed class RunCoordinator(
                     else
                     {
                         var r = await RunCloudAsync(command, provider, auth, steps, lat, cts.Token);
-                        (success, summary, inTok, outTok) = r;
+                        (success, summary, inTok, outTok) = (r.Success, r.Summary, r.InTokens, r.OutTokens);
+                        // Fail over only if the provider was unavailable and nothing has been done yet (no step ran), so nothing can repeat.
+                        if (!r.Success && r.Unavailable && steps.Count == 0 && providers.Fallback(provider.Kind) is { } backup)
+                        {
+                            Log.Warn("ai", $"run {runTag} {provider.Kind} unavailable; failing over to {backup.Kind}/{backup.Model}");
+                            events.Publish(auth.RunId, AgentState.Planning, "provider", $"{provider.Kind} isn't responding, so I'm asking {backup.Kind} instead…");
+                            var first = provider;
+                            provider = backup;
+                            var r2 = await RunCloudAsync(command, backup, auth, steps, lat, cts.Token);
+                            (success, summary) = (r2.Success, r2.Summary);
+                            inTok += r2.InTokens; outTok += r2.OutTokens;
+                            Log.Info("ai", $"run {runTag} failover from {first.Kind} to {backup.Kind} success={r2.Success}");
+                        }
                     }
                     break;
             }
@@ -340,7 +354,12 @@ public sealed class RunCoordinator(
         _ => "Running " + tool,
     };
 
-    private async Task<(bool, string, long, long)> RunCloudAsync(CommandEnvelope command, IReasoningProvider provider, RunAuthorization auth, List<StepRecord> steps, LatencyRecorder lat, CancellationToken ct)
+    private sealed record CloudResult(bool Success, string Summary, long InTokens, long OutTokens, bool Unavailable = false)
+    {
+        public static implicit operator CloudResult((bool s, string m, long i, long o) t) => new(t.s, t.m, t.i, t.o);
+    }
+
+    private async Task<CloudResult> RunCloudAsync(CommandEnvelope command, IReasoningProvider provider, RunAuthorization auth, List<StepRecord> steps, LatencyRecorder lat, CancellationToken ct)
     {
         var tools = registry.Definitions;
         var conv = provider.StartConversation(SystemInstruction, tools);
@@ -414,7 +433,9 @@ public sealed class RunCoordinator(
                 $"tokens={inTok}+{outTok} toolCalls=[{string.Join(", ", calls.Select(c => c.Name))}] textChars={text.Length}" + (error is null ? "" : $" ERROR kind={error.Kind} status={error.HttpStatus?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-"} message={error.Message}"));
             if (calls.Count == 0 && text.Length > 0) Log.Info("ai", $"run {runTag} reply={Log.Text(text.ToString())}");
 
-            if (error is not null) return (false, ErrorText(error, providerName, steps), inTok, outTok);
+            if (error is not null)
+                return new CloudResult(false, ErrorText(error, providerName, steps), inTok, outTok,
+                    error.Kind is ProviderErrorKind.RateLimited or ProviderErrorKind.Server or ProviderErrorKind.Timeout or ProviderErrorKind.Disconnected or ProviderErrorKind.Unauthorized or ProviderErrorKind.BudgetExceeded);
             if (inTok + outTok > options.MaxTokensPerRun) return (false, "I stopped because this task reached the usage limit you set." + Done(steps), inTok, outTok);
 
             if (calls.Count == 0)

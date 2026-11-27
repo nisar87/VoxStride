@@ -174,3 +174,54 @@ public sealed class PauseTests : IDisposable
         Assert.True(File.Exists(Path.Combine(_h.Desktop.Path, "f.pdf")));
     }
 }
+
+public sealed class FailoverTests : IDisposable
+{
+    private readonly Harness _h = new();
+    private readonly EventHub _hub = new();
+    public void Dispose() => _h.Dispose();
+
+    private sealed class Selector(IReasoningProvider main, IReasoningProvider? backup) : IProviderSelector
+    {
+        public IReasoningProvider? Current() => main;
+        public IReasoningProvider? Fallback(ProviderKind failed) => backup;
+    }
+
+    private RunCoordinator Make(IProviderSelector sel) =>
+        new(new IntentRouter(new FakeCatalog()), _h.Registry, new VoxStride.Core.Execution.ToolBroker(_h.Registry, _h.Authority, _h.Journal, _h.Approvals, new VoxStride.Core.Execution.NoStandingRules(), _hub, _h.Time),
+            _h.Authority, sel, _hub, null, null, new RunOptions { SpeakResults = false }, TimeProvider.System);
+
+    private static CommandEnvelope Cmd(string text) => new(Guid.NewGuid(), Guid.NewGuid(), text, VoxStride.Core.Execution.RunAuthority.HashTranscript(text), "en-US", [], DateTimeOffset.UtcNow, InputMode.Voice, null, null);
+
+    [Fact]
+    public async Task UnavailableProviderFailsOverBeforeAnyAction()
+    {
+        var down = new ScriptedProvider(_ => [new ProviderErrorEvent(ProviderErrorKind.Server, "overloaded", 529)]);
+        var backup = new ScriptedProvider(_ => [new TextDeltaEvent("Here's your poem."), new CompletedEvent("end_turn")]);
+        var r = await Make(new Selector(down, backup)).RunAsync(Cmd("write me a short poem about rain"), CancellationToken.None);
+        Assert.True(r.Success);
+        Assert.Equal("Here's your poem.", r.SpokenSummary);
+        Assert.Equal(1, backup.Conversations);
+    }
+
+    [Fact]
+    public async Task NoFailoverAfterAToolAlreadyRan()
+    {
+        var main = new ScriptedProvider(
+            _ => [new ToolCallCompletedEvent("c1", "system_get_free_space", "{\"driveLetter\":\"C\"}"), new CompletedEvent("tool_use")],
+            _ => [new ProviderErrorEvent(ProviderErrorKind.Server, "overloaded", 529)]);
+        var backup = new ScriptedProvider(_ => [new TextDeltaEvent("x"), new CompletedEvent("end_turn")]);
+        var r = await Make(new Selector(main, backup)).RunAsync(Cmd("check my drive and then write a poem about it"), CancellationToken.None);
+        Assert.False(r.Success);
+        Assert.Equal(0, backup.Conversations); // never restart a task that already did something
+    }
+
+    [Fact]
+    public async Task RefusalIsNotAnOutage()
+    {
+        var main = new ScriptedProvider(_ => [new ProviderErrorEvent(ProviderErrorKind.Refused, "no")]);
+        var backup = new ScriptedProvider(_ => [new TextDeltaEvent("x"), new CompletedEvent("end_turn")]);
+        await Make(new Selector(main, backup)).RunAsync(Cmd("write something please"), CancellationToken.None);
+        Assert.Equal(0, backup.Conversations);
+    }
+}

@@ -29,9 +29,18 @@ public sealed class ProviderSelector(AppSettings settings, CredentialSecretStore
 
     public static string SecretName(ProviderKind k) => "provider/" + k.ToString().ToLowerInvariant();
 
-    public IReasoningProvider? Current()
+    public IReasoningProvider? Current() => settings.ActiveProvider is { } kind ? Get(kind) : null;
+
+    public IReasoningProvider? Fallback(ProviderKind failed)
     {
-        if (settings.ActiveProvider is not { } kind) return null;
+        if (settings.FallbackProvider is not { } kind || kind == failed) return null;
+        var p = Get(kind);
+        if (p is null) Log.Warn("ai", $"backup provider {kind} has no key; can't fail over");
+        return p;
+    }
+
+    private IReasoningProvider? Get(ProviderKind kind)
+    {
         var key = secrets.Load(SecretName(kind));
         if (string.IsNullOrWhiteSpace(key)) return null;
         var since = DateTimeOffset.UtcNow.Date;
