@@ -356,10 +356,19 @@ public partial class MainWindow : Window
     private void RefreshUpdateUi()
     {
         VersionText.Text = $"VoxStride {UpdateService.CurrentVersion.ToString(3)}";
-        if (_app.AvailableUpdate is { } u)
+        if (_app.UpdateProgress is { } progress)
         {
-            UpdateText.Text = $"Version {u.Version.ToString(3)} is available." + (string.IsNullOrWhiteSpace(u.Notes) ? "" : " " + (u.Notes.Length > 300 ? u.Notes[..300] + "…" : u.Notes));
+            UpdateText.Text = progress;
             InstallUpdateButton.Visibility = Visibility.Visible;
+            InstallUpdateButton.IsEnabled = progress.StartsWith("The update didn't", StringComparison.Ordinal);
+            InstallUpdateButton.Content = InstallUpdateButton.IsEnabled ? "Try again" : "Updating…";
+        }
+        else if (_app.AvailableUpdate is { } u)
+        {
+            UpdateText.Text = $"Version {u.Version.ToString(3)} is available ({u.Size / 1_000_000} MB)." + (string.IsNullOrWhiteSpace(u.Notes) ? "" : " " + (u.Notes.Length > 300 ? u.Notes[..300] + "…" : u.Notes));
+            InstallUpdateButton.Visibility = Visibility.Visible;
+            InstallUpdateButton.IsEnabled = true;
+            InstallUpdateButton.Content = "Install update now";
         }
         else
         {

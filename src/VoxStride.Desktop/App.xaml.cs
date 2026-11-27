@@ -25,6 +25,8 @@ public partial class App : Application
     private readonly UpdateService _updates = new();
     private DispatcherTimer? _updateTimer;
     public Core.Updates.UpdateInfo? AvailableUpdate { get; private set; }
+    /// <summary>Human-readable update progress shown next to the update button (null when idle).</summary>
+    public string? UpdateProgress { get; private set; }
     public event Action? UpdateStateChanged;
 
     public AppHost? Host { get; private set; }
@@ -166,8 +168,19 @@ public partial class App : Application
         _updateBusy = true;
         try
         {
-            _vm.Status = $"Downloading VoxStride {u.Version.ToString(3)}…";
-            var path = await _updates.DownloadAsync(u, new Progress<double>(p => _vm.Status = $"Downloading update… {p:0}%"), CancellationToken.None);
+            void Show(string text) { UpdateProgress = text; _vm.Status = text; UpdateStateChanged?.Invoke(); }
+            var sizeMb = u.Size > 0 ? $" ({u.Size / 1_000_000} MB)" : "";
+            Show($"Downloading version {u.Version.ToString(3)}{sizeMb}… 0%");
+            DiagnosticsLog.Write($"update-download-start {u.Version.ToString(3)}");
+            var last = -1;
+            var path = await _updates.DownloadAsync(u, new Progress<double>(p =>
+            {
+                if ((int)p == last) return;
+                last = (int)p;
+                Show($"Downloading version {u.Version.ToString(3)}{sizeMb}… {p:0}%");
+            }), CancellationToken.None);
+            Show("Download verified. Installing — VoxStride will close and reopen by itself in a few seconds.");
+            DiagnosticsLog.Write("update-install-launch");
             _vm.AddActivity("Update verified. Installing — VoxStride will restart in a few seconds.", "⬆");
             UpdateService.LaunchInstaller(path);
             await Task.Delay(800);
@@ -175,8 +188,11 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            _vm.AddActivity("The update didn't install: " + ex.Message, "!");
+            UpdateProgress = "The update didn't install: " + ex.Message;
+            DiagnosticsLog.Write("update-error: " + ex.Message);
+            _vm.AddActivity(UpdateProgress, "!");
             _updateBusy = false;
+            UpdateStateChanged?.Invoke();
         }
     }
 
