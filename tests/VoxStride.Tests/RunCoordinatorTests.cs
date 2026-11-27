@@ -53,6 +53,9 @@ public sealed class RunCoordinatorTests : IDisposable
     public RunCoordinatorTests() { _hub.Published += e => { lock (_events) _events.Add(e); }; }
     public void Dispose() => _h.Dispose();
 
+    /// <summary>Events are published from background threads (e.g. "still waiting" ticks); read a locked copy.</summary>
+    private List<TaskEvent> EventsNow() { lock (_events) return [.. _events]; }
+
     private RunCoordinator Make(IProviderSelector sel, RunOptions? o = null) =>
         new(new IntentRouter(new FakeCatalog()), _h.Registry, new VoxStride.Core.Execution.ToolBroker(_h.Registry, _h.Authority, _h.Journal, _h.Approvals, new VoxStride.Core.Execution.NoStandingRules(), _hub, _h.Time),
             _h.Authority, sel, _hub, null, null, o ?? new RunOptions { SpeakResults = false }, TimeProvider.System);
@@ -151,12 +154,12 @@ public sealed class RunCoordinatorTests : IDisposable
         var rc = Make(new CountingSelector(p), new RunOptions { SpeakResults = false, WaitingNoticeInterval = TimeSpan.FromMilliseconds(200) });
         var run = rc.RunAsync(Cmd("make my desktop tidy somehow"), CancellationToken.None);
         await Task.Delay(700);
-        Assert.Contains(_events, e => e.Phase == "waiting");
+        Assert.Contains(EventsNow(), e => e.Phase == "waiting");
         await rc.CancelActiveAsync("test");
         var r = await run;
         Assert.False(r.Success);
         Assert.Contains("Nothing was changed", r.SpokenSummary);
-        Assert.DoesNotContain(_events, e => e.Phase == "step");
+        Assert.DoesNotContain(EventsNow(), e => e.Phase == "step");
     }
 
     [Fact]

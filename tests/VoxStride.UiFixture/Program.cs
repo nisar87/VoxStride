@@ -13,7 +13,7 @@ public static class Program
         var form = new Form { Text = title, Width = 520, Height = 300, StartPosition = FormStartPosition.Manual, Left = 120, Top = 120 };
         var name = new TextBox { Left = 20, Top = 20, Width = 300, AccessibleName = "Your name", Name = "NameBox" };
         var greet = new Button { Left = 340, Top = 18, Width = 120, Height = 32, Text = "Greet", Name = "GreetButton" };
-        var greeting = new Label { Left = 20, Top = 70, Width = 440, Height = 24, Text = "Nobody greeted yet", AccessibleName = "Greeting", Name = "GreetingLabel" };
+        var greeting = new Label { Left = 20, Top = 70, Width = 440, Height = 24, Text = "Nobody greeted yet", Name = "GreetingLabel" }; // no AccessibleName: UIA Name must follow the text
         var subscribe = new CheckBox { Left = 20, Top = 110, Width = 200, Text = "Subscribe", Name = "SubscribeBox" };
         var danger = new Button { Left = 20, Top = 150, Width = 200, Height = 32, Text = "Delete everything", Name = "DangerButton" };
         var notes = new TextBox { Left = 20, Top = 195, Width = 440, AccessibleName = "Notes", Name = "NotesBox" };

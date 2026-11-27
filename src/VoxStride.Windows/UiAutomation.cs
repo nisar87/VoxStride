@@ -357,17 +357,23 @@ public sealed class WindowsUiAutomation : IUiAutomation, IDisposable
             typed++;
             if (typed % 40 == 0) await Task.Delay(5, ct).ConfigureAwait(false);
         }
-        // Verify where the control supports reading its value.
+        // Verify where the control supports reading its value. SendInput is asynchronous: the app may still be
+        // processing the keystrokes, so poll briefly instead of reading once.
         var verified = false;
-        try
+        var expected = text.ReplaceLineEndings("\n").Split('\n')[^1];
+        for (var attempt = 0; attempt < 15 && !verified; attempt++)
         {
-            verified = await Run("verify typing", () =>
+            if (attempt > 0) await Task.Delay(100, ct).ConfigureAwait(false);
+            try
             {
-                var el = ElementOf(w, elementId, out _);
-                return el is not null && el.TryGetCurrentPattern(ValuePattern.Pattern, out var p) && ((ValuePattern)p).Current.Value.Contains(text.ReplaceLineEndings("\r\n").Split('\n')[0].TrimEnd('\r'), StringComparison.Ordinal);
-            }, ct).ConfigureAwait(false);
+                verified = await Run("verify typing", () =>
+                {
+                    var el = ElementOf(w, elementId, out _);
+                    return el is not null && el.TryGetCurrentPattern(ValuePattern.Pattern, out var p) && ((ValuePattern)p).Current.Value.Contains(expected, StringComparison.Ordinal);
+                }, ct).ConfigureAwait(false);
+            }
+            catch (Exception) { break; } // control can't be read back: report unverified honestly
         }
-        catch (Exception) { }
         Log.Info("ui", $"typed {typed} chars into {w.ProcessName} verified={verified}");
         return new UiActionResult(true, Message: verified ? "Typed and checked." : "Typed (this control doesn't let me read it back to check).", Verified: verified);
     }
