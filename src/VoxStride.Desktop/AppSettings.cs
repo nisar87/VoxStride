@@ -8,6 +8,8 @@ using VoxStride.Providers;
 
 namespace VoxStride.Desktop;
 
+/// <summary>Speech engine choice. <c>WindowsOnline</c> is kept only so older settings files still load; it means Auto
+/// (Windows online dictation requires an MSIX-packaged app and can never work in this installer build).</summary>
 public enum SpeechEngine { Auto, Windows, OpenAI, Gemini, WindowsOnline }
 
 /// <summary>Non-secret user settings (JSON in %LocalAppData%\VoxStride). API keys live in Windows Credential Manager.</summary>
@@ -63,7 +65,12 @@ public sealed class AppSettings
     {
         try
         {
-            if (File.Exists(FilePath)) return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath), Json) ?? new AppSettings();
+            if (File.Exists(FilePath))
+            {
+                var loaded = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath), Json) ?? new AppSettings();
+                if (loaded.SpeechEngine == SpeechEngine.WindowsOnline) loaded.SpeechEngine = SpeechEngine.Auto;
+                return loaded;
+            }
         }
         catch (Exception) { /* corrupt settings: fall back to safe defaults */ }
         return new AppSettings();

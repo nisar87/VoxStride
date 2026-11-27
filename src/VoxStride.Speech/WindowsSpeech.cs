@@ -1,8 +1,10 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Speech.AudioFormat;
 using System.Speech.Recognition;
 using System.Speech.Synthesis;
 using VoxStride.Contracts;
+using VoxStride.Core.Voice;
 
 namespace VoxStride.Speech;
 
@@ -31,84 +33,187 @@ public static class SpeechEnvironment
     }
 }
 
+/// <summary>Optional diagnostics a recognizer can raise besides hard errors.</summary>
+public interface ISpeechDiagnostics
+{
+    /// <summary>A gentle, non-fatal hint (e.g. "I haven't heard any sound yet"). Never interrupts the instruction.</summary>
+    event Action<string>? Hint;
+}
+
 /// <summary>
 /// Local streaming dictation using the installed Windows speech recognizer (no network, no keys).
-/// Emits revisioned interim hypotheses and finals per utterance with audio-time ordering. Control phrases
-/// are added as a small grammar for accuracy; the coordinator — not this class — decides what they mean.
+/// Audio comes from the shared <see cref="AudioHub"/> through a <see cref="PcmPipeStream"/>, which fills every engine
+/// read completely — SAPI ends recognition on a short read. Each listening session owns one microphone lease that is
+/// released on every path (stop, cancel, engine ending on its own, dispose).
 /// </summary>
-public sealed class WindowsSpeechRecognizer : ISpeechRecognizer
+public sealed class WindowsSpeechRecognizer : ISpeechRecognizer, ISpeechDiagnostics
 {
     private readonly string _culture;
     private readonly IReadOnlyList<string> _controlPhrases;
-    private readonly int _deviceId;
+    private readonly AudioHub _mic;
+    private readonly Action<string>? _log;
+    private readonly Lock _gate = new();
     private SpeechRecognitionEngine? _engine;
-    private MicInput? _mic;
+    private Run? _active;    // the session currently accepting speech
+    private Run? _engineRun; // the run the engine is processing (cleared when the engine completes)
     private Guid _session;
     private int _segment;
     private int _revision;
     private long _sequence;
     private long _segmentStartMs;
-    private TaskCompletionSource? _stopped;
-    private bool _running;
-    private readonly Lock _gate = new();
 
-    public WindowsSpeechRecognizer(string culture, IReadOnlyList<string> controlPhrases, int deviceId = -1)
+    private sealed class Run(AudioLease lease, PcmPipeStream pipe)
+    {
+        public AudioLease Lease { get; } = lease;
+        public PcmPipeStream Pipe { get; } = pipe;
+        public MicWatchdog? Watchdog { get; set; }
+        public TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool Stopping { get; set; }
+        public int Hypotheses, Finals, Rejected;
+        public int CleanedUp;
+    }
+
+    public WindowsSpeechRecognizer(string culture, IReadOnlyList<string> controlPhrases, AudioHub microphone, Action<string>? log = null)
     {
         _culture = culture;
         _controlPhrases = controlPhrases;
-        _deviceId = deviceId;
+        _mic = microphone;
+        _log = log;
+        _mic.DeviceError += m => { if (_active is not null) Error?.Invoke(m); };
     }
 
-    public string Name => "Windows speech recognition (local)";
+    public string Name => "Windows speech recognition (offline)";
     public event Action<TranscriptEvent>? Transcript;
     public event Action<string>? Error;
-    public event Action<double>? Level;
+    public event Action<string>? Hint;
 
-    public Task StartAsync(Guid sessionId, CancellationToken ct)
+    public async Task StartAsync(Guid sessionId, CancellationToken ct)
     {
+        Task? previous;
         lock (_gate)
         {
             _session = sessionId;
-            if (_engine is null)
-            {
-                var info = SpeechEnvironment.PickRecognizer(_culture) ?? throw new InvalidOperationException("No Windows speech recognizer is installed. Add an English speech pack in Settings > Time & language > Speech, or type your instruction.");
-                _engine = new SpeechRecognitionEngine(info);
-                var dictation = new DictationGrammar { Name = "dictation", Weight = 0.9f };
-                _engine.LoadGrammar(dictation);
-                if (_controlPhrases.Count > 0)
-                {
-                    var g = new Grammar(new GrammarBuilder(new Choices(_controlPhrases.ToArray())) { Culture = info.Culture }) { Name = "control", Weight = 1.0f, Priority = 1 };
-                    _engine.LoadGrammar(g);
-                }
-                _engine.SpeechDetected += (_, e) => { lock (_gate) { _segment++; _revision = 0; _segmentStartMs = (long)e.AudioPosition.TotalMilliseconds; } };
-                _engine.SpeechHypothesized += (_, e) => Emit(e.Result.Text, isFinal: false, e.Result.Confidence, e.Result.Audio);
-                _engine.SpeechRecognized += (_, e) => Emit(e.Result.Text, isFinal: true, e.Result.Confidence, e.Result.Audio);
-                _engine.SpeechRecognitionRejected += (_, e) =>
-                {
-                    // Rejected audio: finalize the segment with its best guess at low confidence so pending interims don't block;
-                    // control detection treats low confidence as uncertain and never commits on it.
-                    var alt = e.Result.Alternates.FirstOrDefault();
-                    Emit(alt?.Text ?? "", isFinal: true, alt?.Confidence ?? 0, e.Result.Audio);
-                };
-                // Note: AudioSignalProblem.NoSignal also fires during ordinary silence, so it is NOT treated as a microphone
-                // failure. Real "no audio" is detected from the captured level instead (see MicInput.SilenceCheck).
-                _engine.RecognizeCompleted += (_, e) =>
-                {
-                    if (e.Error is not null) Error?.Invoke(e.Error.Message);
-                    lock (_gate) _running = false;
-                    _stopped?.TrySetResult();
-                };
-            }
-            if (_running) return Task.CompletedTask; // already capturing: only the session id changes
-            _mic = new MicInput(_deviceId);
-            _mic.Level += l => Level?.Invoke(l);
-            _mic.Problem += m => Error?.Invoke(m);
-            _mic.Attach(_engine);
-            _stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _engine.RecognizeAsync(RecognizeMode.Multiple);
-            _running = true;
+            if (_active is not null) return; // already listening: only the session id changes
+            previous = _engineRun?.Done.Task;
         }
-        return Task.CompletedTask;
+        // The engine can't start a new recognition until the previous one has fully completed.
+        if (previous is { IsCompleted: false })
+            await Task.WhenAny(previous, Task.Delay(1500, ct)).ConfigureAwait(false);
+
+        SpeechRecognitionEngine? stale = null;
+        lock (_gate)
+        {
+            if (_active is null && _engineRun is not null)
+            {
+                _log?.Invoke("speech-engine-reset: previous recognition never completed");
+                stale = DetachEngine();
+            }
+        }
+        DisposeEngine(stale);
+
+        lock (_gate)
+        {
+            if (_active is not null) return;
+            var engine = EnsureEngine();
+            var lease = _mic.Acquire("dictation"); // throws a clear message if the microphone can't be opened
+            var pipe = new PcmPipeStream();
+            lease.Data += pipe.Append;
+            var run = new Run(lease, pipe);
+            try
+            {
+                engine.SetInputToAudioStream(pipe, new SpeechAudioFormatInfo(lease.SampleRate, AudioBitsPerSample.Sixteen, AudioChannel.Mono));
+                engine.RecognizeAsync(RecognizeMode.Multiple);
+            }
+            catch
+            {
+                Cleanup(run, "start failed");
+                throw;
+            }
+            run.Watchdog = new MicWatchdog(lease, m => Error?.Invoke(m), m => Hint?.Invoke(m));
+            _active = run;
+            _engineRun = run;
+            _log?.Invoke($"speech-start engine=offline culture={engine.RecognizerInfo.Culture.Name} device=\"{lease.DeviceLabel}\"");
+        }
+    }
+
+    private SpeechRecognitionEngine EnsureEngine()
+    {
+        if (_engine is not null) return _engine;
+        var info = SpeechEnvironment.PickRecognizer(_culture) ?? throw new InvalidOperationException("No Windows speech recognizer is installed. Add an English speech pack in Settings › Time & language › Speech, or type your instruction.");
+        var engine = new SpeechRecognitionEngine(info);
+        engine.LoadGrammar(new DictationGrammar { Name = "dictation", Weight = 0.9f });
+        if (_controlPhrases.Count > 0)
+            engine.LoadGrammar(new Grammar(new GrammarBuilder(new Choices(_controlPhrases.ToArray())) { Culture = info.Culture }) { Name = "control", Weight = 1.0f, Priority = 1 });
+        // Live audio: give the engine room to wait for the end of a phrase instead of cutting it short.
+        engine.EndSilenceTimeout = TimeSpan.FromMilliseconds(700);
+        engine.EndSilenceTimeoutAmbiguous = TimeSpan.FromMilliseconds(1000);
+        engine.BabbleTimeout = TimeSpan.Zero;
+        engine.InitialSilenceTimeout = TimeSpan.Zero;
+        engine.SpeechDetected += (_, e) => { lock (_gate) { _segment++; _revision = 0; _segmentStartMs = (long)e.AudioPosition.TotalMilliseconds; } };
+        engine.SpeechHypothesized += (_, e) => { if (_engineRun is { } r) Interlocked.Increment(ref r.Hypotheses); Emit(e.Result.Text, false, e.Result.Confidence, e.Result.Audio); };
+        engine.SpeechRecognized += (_, e) =>
+        {
+            if (_engineRun is { } r) Interlocked.Increment(ref r.Finals);
+            Emit(e.Result.Text, true, e.Result.Confidence, e.Result.Audio);
+        };
+        engine.SpeechRecognitionRejected += (_, e) =>
+        {
+            // Finalize the segment with its best guess at low confidence so pending interims don't block;
+            // control detection treats low confidence as uncertain and never commits on it.
+            if (_engineRun is { } r) Interlocked.Increment(ref r.Rejected);
+            var alt = e.Result.Alternates.FirstOrDefault();
+            Emit(alt?.Text ?? "", true, alt?.Confidence ?? 0, e.Result.Audio);
+        };
+        engine.RecognizeCompleted += (sender, e) =>
+        {
+            Run? run;
+            bool unexpected;
+            lock (_gate)
+            {
+                if (!ReferenceEquals(sender, _engine)) return; // a replaced engine finishing late
+                run = _engineRun;
+                _engineRun = null;
+                unexpected = run is not null && !run.Stopping;
+                if (unexpected && ReferenceEquals(_active, run)) _active = null;
+            }
+            if (run is null) return;
+            if (unexpected)
+            {
+                _log?.Invoke("speech-engine-ended-unexpectedly: " + (e.Error?.Message ?? "end of audio"));
+                Error?.Invoke(e.Error is not null ? "speech recognition stopped: " + e.Error.Message : "speech recognition stopped unexpectedly. Press Talk to try again, or type your instruction");
+            }
+            Cleanup(run, unexpected ? "engine ended" : "stopped");
+            run.Done.TrySetResult();
+        };
+        _engine = engine;
+        return engine;
+    }
+
+    /// <summary>Detaches the engine (call under the lock); dispose the returned engine outside the lock.</summary>
+    private SpeechRecognitionEngine? DetachEngine()
+    {
+        var old = _engine;
+        _engine = null; // late events from it are ignored (sender check)
+        if (_engineRun is { } r) { Cleanup(r, "engine reset"); r.Done.TrySetResult(); }
+        _engineRun = null;
+        return old;
+    }
+
+    /// <summary>Engine calls never run under our lock: its event threads take the same lock.</summary>
+    private static void DisposeEngine(SpeechRecognitionEngine? engine)
+    {
+        if (engine is null) return;
+        try { engine.RecognizeAsyncCancel(); } catch (Exception) { }
+        try { engine.Dispose(); } catch (Exception) { }
+    }
+
+    private void Cleanup(Run run, string reason)
+    {
+        if (Interlocked.Exchange(ref run.CleanedUp, 1) != 0) return;
+        run.Watchdog?.Dispose();
+        run.Pipe.Complete();
+        _log?.Invoke($"speech-session engine=offline reason={reason} device=\"{run.Lease.DeviceLabel}\" ms={(long)run.Lease.Elapsed.TotalMilliseconds} buffers={run.Lease.Buffers} peak={run.Lease.Peak:0} dropped={run.Pipe.DroppedBytes} hypotheses={run.Hypotheses} finals={run.Finals} rejected={run.Rejected}");
+        run.Lease.Dispose();
     }
 
     private void Emit(string text, bool isFinal, float confidence, RecognizedAudio? audio)
@@ -126,47 +231,63 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer
 
     public async Task StopAsync(TimeSpan flushTimeout, CancellationToken ct)
     {
-        Task? wait;
+        Run? run;
+        SpeechRecognitionEngine? engine;
         lock (_gate)
         {
-            if (_engine is null || _stopped is null || !_running) return;
-            wait = _stopped.Task;
-            _mic?.Stop(); // end of audio: the engine finalizes the last phrase, then completes
-            if (flushTimeout <= TimeSpan.Zero) _engine.RecognizeAsyncCancel();
-            else _engine.RecognizeAsyncStop();
+            run = _active;
+            if (run is null) return;
+            _active = null;
+            run.Stopping = true;
+            engine = _engine;
         }
-        await Task.WhenAny(wait, Task.Delay(flushTimeout <= TimeSpan.Zero ? TimeSpan.FromMilliseconds(300) : flushTimeout, ct)).ConfigureAwait(false);
-        if (!wait.IsCompleted)
+        run.Watchdog?.Dispose();
+        run.Lease.Data -= run.Pipe.Append; // no new audio after the user finished
+        if (flushTimeout <= TimeSpan.Zero) { try { engine?.RecognizeAsyncCancel(); } catch (Exception) { } }
+        run.Pipe.Complete(); // end of audio → the engine finalizes the last phrase from what it has, then completes
+        var wait = flushTimeout <= TimeSpan.Zero ? TimeSpan.FromMilliseconds(500) : flushTimeout;
+        try { await Task.WhenAny(run.Done.Task, Task.Delay(wait, ct)).ConfigureAwait(false); } catch (OperationCanceledException) { }
+        if (!run.Done.Task.IsCompleted)
         {
-            lock (_gate) _engine?.RecognizeAsyncCancel();
-            await Task.WhenAny(wait, Task.Delay(500, ct)).ConfigureAwait(false);
+            try { engine?.RecognizeAsyncCancel(); } catch (Exception) { }
+            try { await Task.WhenAny(run.Done.Task, Task.Delay(500, ct)).ConfigureAwait(false); } catch (OperationCanceledException) { }
         }
-        lock (_gate)
-        {
-            _running = !wait.IsCompleted && _running;
-            try { _engine?.SetInputToNull(); } catch (Exception) { } // release the microphone
-            _mic = null;
-        }
+        Cleanup(run, run.Done.Task.IsCompleted ? "stopped" : "stop timed out"); // the microphone is released even if the engine hangs
     }
 
     public ValueTask DisposeAsync()
     {
-        lock (_gate) { _session = Guid.Empty; _mic?.Stop(); _engine?.Dispose(); _engine = null; }
+        SpeechRecognitionEngine? engine;
+        lock (_gate)
+        {
+            _session = Guid.Empty;
+            if (_active is { } a) Cleanup(a, "dispose");
+            _active = null;
+            engine = DetachEngine();
+        }
+        DisposeEngine(engine);
         return ValueTask.CompletedTask;
     }
 }
 
 /// <summary>
-/// Local wake phrase detection with a constrained Windows speech grammar ("Hey VoxStride" + variants).
-/// Optionally captures words spoken immediately after the wake phrase so the start of a command isn't clipped.
-/// Confidence-gated; false-trigger rate must be measured on real audio (docs/benchmarks).
+/// Local "Hey VoxStride" detection with a constrained Windows speech grammar. Listens through a lease on the shared
+/// <see cref="AudioHub"/>; if the engine ever stops on its own it is restarted (rate-limited) and the event logged.
+/// Optionally captures words spoken right after the wake phrase so the start of a command isn't clipped.
 /// </summary>
 public sealed class WindowsWakeWordDetector : IWakeWordDetector
 {
     private readonly string _culture;
-    private SpeechRecognitionEngine? _engine;
-    private bool _running;
+    private readonly AudioHub _mic;
+    private readonly Action<string>? _log;
     private readonly Lock _gate = new();
+    private SpeechRecognitionEngine? _engine;
+    private AudioLease? _lease;
+    private PcmPipeStream? _pipe;
+    private bool _wanted;
+    private bool _recognizing;
+    private readonly Queue<DateTimeOffset> _restarts = new();
+
     public float MinConfidence { get; set; } = 0.72f;
     public string Phrase => "Hey VoxStride";
     public event Action<DateTimeOffset>? WakeDetected;
@@ -175,146 +296,142 @@ public sealed class WindowsWakeWordDetector : IWakeWordDetector
 
     public static readonly string[] Variants = ["hey voxstride", "hey vox stride", "okay voxstride", "ok vox stride", "hi voxstride"];
 
-    private readonly int _deviceId;
-    private MicInput? _mic;
-    public WindowsWakeWordDetector(string culture, int deviceId = -1) { _culture = culture; _deviceId = deviceId; }
+    public WindowsWakeWordDetector(string culture, AudioHub microphone, Action<string>? log = null)
+    {
+        _culture = culture;
+        _mic = microphone;
+        _log = log;
+    }
+
+    public bool IsListening { get { lock (_gate) return _lease is not null; } }
 
     public Task StartAsync(CancellationToken ct)
     {
         lock (_gate)
         {
-            if (_engine is null)
-            {
-                var info = SpeechEnvironment.PickRecognizer(_culture) ?? throw new InvalidOperationException("No Windows speech recognizer is installed.");
-                _engine = new SpeechRecognitionEngine(info);
-                var wake = new GrammarBuilder(new Choices(Variants)) { Culture = info.Culture };
-                _engine.LoadGrammar(new Grammar(wake) { Name = "wake" });
-                var wakeWithText = new GrammarBuilder(new Choices(Variants)) { Culture = info.Culture };
-                wakeWithText.AppendDictation();
-                _engine.LoadGrammar(new Grammar(wakeWithText) { Name = "wake+dictation", Weight = 0.8f });
-                _engine.SpeechRecognized += (_, e) =>
-                {
-                    if (e.Result.Confidence < MinConfidence) return;
-                    var words = e.Result.Words;
-                    var wakeIdx = words.Count > 1 && words[1].Text.Equals("vox", StringComparison.OrdinalIgnoreCase) ? 3 : 2;
-                    if (words.Take(wakeIdx).Any(w => w.Confidence < MinConfidence * 0.8f)) return;
-                    WakeDetected?.Invoke(DateTimeOffset.UtcNow);
-                    if (words.Count > wakeIdx) TrailingText?.Invoke(string.Join(' ', words.Skip(wakeIdx).Select(w => w.Text)));
-                };
-            }
-            if (_running) return Task.CompletedTask;
-            _mic = new MicInput(_deviceId, silenceCheck: false);
-            _mic.Attach(_engine);
-            _engine.RecognizeAsync(RecognizeMode.Multiple);
-            _running = true;
+            _wanted = true;
+            if (_lease is not null) return Task.CompletedTask;
+            BeginCore();
         }
         return Task.CompletedTask;
     }
 
+    private void BeginCore()
+    {
+        if (_recognizing && _engine is { } busy)
+        {
+            // A cancelled recognition finishes asynchronously; rather than race it, start on a fresh engine.
+            _engine = null;
+            _recognizing = false;
+            _ = Task.Run(() => { try { busy.RecognizeAsyncCancel(); busy.Dispose(); } catch (Exception) { } }); // never under our lock
+        }
+        var engine = EnsureEngine();
+        var lease = _mic.Acquire("wake");
+        var pipe = new PcmPipeStream();
+        lease.Data += pipe.Append;
+        try
+        {
+            engine.SetInputToAudioStream(pipe, new SpeechAudioFormatInfo(lease.SampleRate, AudioBitsPerSample.Sixteen, AudioChannel.Mono));
+            engine.RecognizeAsync(RecognizeMode.Multiple);
+        }
+        catch
+        {
+            pipe.Complete();
+            lease.Dispose();
+            throw;
+        }
+        _recognizing = true;
+        _lease = lease;
+        _pipe = pipe;
+    }
+
+    private SpeechRecognitionEngine EnsureEngine()
+    {
+        if (_engine is not null) return _engine;
+        var info = SpeechEnvironment.PickRecognizer(_culture) ?? throw new InvalidOperationException("No Windows speech recognizer is installed.");
+        var engine = new SpeechRecognitionEngine(info);
+        engine.LoadGrammar(new Grammar(new GrammarBuilder(new Choices(Variants)) { Culture = info.Culture }) { Name = "wake" });
+        var wakeWithText = new GrammarBuilder(new Choices(Variants)) { Culture = info.Culture };
+        wakeWithText.AppendDictation();
+        engine.LoadGrammar(new Grammar(wakeWithText) { Name = "wake+dictation", Weight = 0.8f });
+        engine.SpeechRecognized += (_, e) =>
+        {
+            if (e.Result.Confidence < MinConfidence) return;
+            var words = e.Result.Words;
+            var wakeIdx = words.Count > 1 && words[1].Text.Equals("vox", StringComparison.OrdinalIgnoreCase) ? 3 : 2;
+            if (words.Take(wakeIdx).Any(w => w.Confidence < MinConfidence * 0.8f)) return;
+            _log?.Invoke($"wake-detected confidence={e.Result.Confidence:0.00}");
+            WakeDetected?.Invoke(DateTimeOffset.UtcNow);
+            if (words.Count > wakeIdx) TrailingText?.Invoke(string.Join(' ', words.Skip(wakeIdx).Select(w => w.Text)));
+        };
+        engine.RecognizeCompleted += (sender, e) =>
+        {
+            lock (_gate)
+            {
+                if (!ReferenceEquals(sender, _engine)) return; // a replaced engine finishing late
+                _recognizing = false;
+                if (!_wanted || _lease is null) return;
+                // Should not happen with a live pipe. Release, log, and restart a limited number of times.
+                _log?.Invoke("wake-engine-ended-unexpectedly: " + (e.Error?.Message ?? "end of audio"));
+                ReleaseCore();
+                var now = DateTimeOffset.UtcNow;
+                while (_restarts.Count > 0 && now - _restarts.Peek() > TimeSpan.FromMinutes(1)) _restarts.Dequeue();
+                if (_restarts.Count >= 3) { _log?.Invoke("wake-engine-gave-up"); _wanted = false; return; }
+                _restarts.Enqueue(now);
+            }
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(500).ConfigureAwait(false);
+                lock (_gate)
+                {
+                    if (!_wanted || _lease is not null) return;
+                    try { BeginCore(); } catch (Exception ex) { _log?.Invoke("wake-restart-failed: " + ex.Message); }
+                }
+            });
+        };
+        _engine = engine;
+        return engine;
+    }
+
+    private void ReleaseCore()
+    {
+        _pipe?.Complete();
+        _pipe = null;
+        _lease?.Dispose();
+        _lease = null;
+    }
+
     public Task StopAsync()
     {
+        SpeechRecognitionEngine? engine;
         lock (_gate)
         {
-            if (!_running) return Task.CompletedTask;
-            _mic?.Stop();
-            _mic = null;
-            try { _engine?.RecognizeAsyncCancel(); _engine?.SetInputToNull(); } catch (Exception) { }
-            _running = false;
+            _wanted = false;
+            if (_lease is null) return Task.CompletedTask;
+            ReleaseCore(); // the microphone lease is released immediately, whatever the engine does
+            engine = _engine;
         }
+        try { engine?.RecognizeAsyncCancel(); } catch (Exception) { } // engine calls never run under our lock
         return Task.CompletedTask;
     }
 
     public ValueTask DisposeAsync()
     {
-        lock (_gate) { _mic?.Stop(); _engine?.Dispose(); _engine = null; }
-        return ValueTask.CompletedTask;
-    }
-}
-
-/// <summary>
-/// Captures the user's chosen microphone with <see cref="WaveInRecorder"/> and feeds it to a Windows speech engine
-/// through a blocking stream. This lets the user pick the device, shows a live level, and detects a genuinely silent
-/// (muted, disconnected or privacy-blocked) microphone instead of relying on the engine's noisy NoSignal event.
-/// </summary>
-internal sealed class MicInput
-{
-    private readonly WaveInRecorder _rec;
-    private readonly BlockingAudioStream _stream = new();
-    private readonly bool _silenceCheck;
-    private Timer? _timer;
-    public event Action<double>? Level;
-    public event Action<string>? Problem;
-
-    public MicInput(int deviceId, bool silenceCheck = true)
-    {
-        _rec = new WaveInRecorder(deviceId);
-        _silenceCheck = silenceCheck;
-        _rec.DataAvailable += d => _stream.Write(d);
-        _rec.Level += l => Level?.Invoke(l);
-        _rec.Error += m => Problem?.Invoke(m);
-    }
-
-    public void Attach(SpeechRecognitionEngine engine)
-    {
-        _rec.Start(); // throws a clear message if the device can't be opened
-        engine.SetInputToAudioStream(_stream, new System.Speech.AudioFormat.SpeechAudioFormatInfo(_rec.SampleRate, System.Speech.AudioFormat.AudioBitsPerSample.Sixteen, System.Speech.AudioFormat.AudioChannel.Mono));
-        if (_silenceCheck)
-            _timer = new Timer(_ =>
-            {
-                if (_rec.PeakSinceStart < 30)
-                    Problem?.Invoke(WaveInRecorder.SilenceAdvice(_rec.DeviceId));
-            }, null, TimeSpan.FromSeconds(6), Timeout.InfiniteTimeSpan);
-    }
-
-    public void Stop()
-    {
-        _timer?.Dispose();
-        _rec.Stop();
-        _stream.Complete();
-    }
-}
-
-/// <summary>Producer/consumer stream: Read blocks until audio arrives; returns 0 only after Complete().</summary>
-internal sealed class BlockingAudioStream : Stream
-{
-    private readonly Queue<byte[]> _chunks = new();
-    private byte[]? _current;
-    private int _offset;
-    private bool _completed;
-    private readonly object _gate = new();
-
-    public void Write(byte[] data) { lock (_gate) { if (_completed) return; _chunks.Enqueue(data); Monitor.PulseAll(_gate); } }
-    public void Complete() { lock (_gate) { _completed = true; Monitor.PulseAll(_gate); } }
-
-    public override int Read(byte[] buffer, int offset, int count)
-    {
+        SpeechRecognitionEngine? engine;
         lock (_gate)
         {
-            while (true)
-            {
-                if (_current is not null && _offset < _current.Length)
-                {
-                    var n = Math.Min(count, _current.Length - _offset);
-                    Buffer.BlockCopy(_current, _offset, buffer, offset, n);
-                    _offset += n;
-                    return n;
-                }
-                if (_chunks.Count > 0) { _current = _chunks.Dequeue(); _offset = 0; continue; }
-                if (_completed) return 0;
-                Monitor.Wait(_gate);
-            }
+            _wanted = false;
+            ReleaseCore();
+            engine = _engine;
+            _engine = null;
         }
+        if (engine is not null)
+        {
+            try { engine.RecognizeAsyncCancel(); } catch (Exception) { }
+            try { engine.Dispose(); } catch (Exception) { }
+        }
+        return ValueTask.CompletedTask;
     }
-
-    public override bool CanRead => true;
-    public override bool CanSeek => false;
-    public override bool CanWrite => false;
-    public override long Length => -1;
-    public override long Position { get => 0; set { } }
-    public override void Flush() { }
-    public override long Seek(long offset, SeekOrigin origin) => 0;
-    public override void SetLength(long value) { }
-    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 }
 
 /// <summary>Local TTS with installed Windows voices plus cached in-memory earcons (no network).</summary>

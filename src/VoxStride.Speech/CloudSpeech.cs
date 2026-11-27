@@ -6,256 +6,79 @@ using VoxStride.Providers;
 
 namespace VoxStride.Speech;
 
-/// <summary>Minimal WASAPI-compatible microphone capture through winmm waveIn (16 kHz, mono, 16-bit). No extra dependencies.</summary>
-public sealed class WaveInRecorder : IDisposable
-{
-    private const int CALLBACK_EVENT = 0x50000, WHDR_DONE = 1, BufferMs = 50, BufferCount = 8;
-    private const int WAVE_MAPPER = -1;
-    // WAVE_MAPPER is ((UINT)-1) passed as UINT_PTR: on x64 that is 0x00000000FFFFFFFF, not a sign-extended -1.
-    private static nint DeviceArg(int id) => id < 0 ? unchecked((nint)0xFFFFFFFFu) : id;
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct WAVEFORMATEX { public ushort wFormatTag, nChannels; public uint nSamplesPerSec, nAvgBytesPerSec; public ushort nBlockAlign, wBitsPerSample, cbSize; }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct WAVEHDR { public nint lpData; public uint dwBufferLength, dwBytesRecorded; public nint dwUser; public uint dwFlags, dwLoops; public nint lpNext, reserved; }
-
-    [DllImport("winmm.dll")] private static extern int waveInOpen(out nint h, nint device, ref WAVEFORMATEX fmt, nint callback, nint instance, int flags);
-    [DllImport("winmm.dll")] private static extern int waveInPrepareHeader(nint h, nint hdr, int size);
-    [DllImport("winmm.dll")] private static extern int waveInUnprepareHeader(nint h, nint hdr, int size);
-    [DllImport("winmm.dll")] private static extern int waveInAddBuffer(nint h, nint hdr, int size);
-    [DllImport("winmm.dll")] private static extern int waveInStart(nint h);
-    [DllImport("winmm.dll")] private static extern int waveInReset(nint h);
-    [DllImport("winmm.dll")] private static extern int waveInClose(nint h);
-    [DllImport("winmm.dll")] private static extern int waveInGetNumDevs();
-    [DllImport("winmm.dll", CharSet = CharSet.Unicode, EntryPoint = "waveInGetDevCapsW")] private static extern int waveInGetDevCaps(nint id, ref WAVEINCAPS caps, int size);
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct WAVEINCAPS { public ushort wMid, wPid; public uint vDriverVersion; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szPname; public uint dwFormats; public ushort wChannels, wReserved1; }
-
-    public WaveInRecorder(int deviceId = WAVE_MAPPER) { DeviceId = deviceId; }
-
-    public int DeviceId { get; }
-    public int SampleRate { get; } = 16000;
-    public event Action<byte[]>? DataAvailable;
-    public event Action<string>? Error;
-    /// <summary>RMS level of the latest buffer (0–32767), for the microphone meter and diagnostics.</summary>
-    public event Action<double>? Level;
-    public double PeakSinceStart { get; private set; }
-
-    /// <summary>Recording devices in waveIn order (index = device id). Names are truncated by Windows to 31 characters.</summary>
-    public static IReadOnlyList<string> Devices()
-    {
-        var list = new List<string>();
-        var n = waveInGetNumDevs();
-        for (var i = 0; i < n; i++)
-        {
-            var caps = new WAVEINCAPS();
-            list.Add(waveInGetDevCaps(i, ref caps, Marshal.SizeOf<WAVEINCAPS>()) == 0 ? caps.szPname : $"Microphone {i + 1}");
-        }
-        return list;
-    }
-
-    /// <summary>Finds the device id for a saved microphone name (prefix match, since Windows truncates names); -1 = system default.</summary>
-    public static int ResolveDevice(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return WAVE_MAPPER;
-        var devices = Devices();
-        for (var i = 0; i < devices.Count; i++)
-            if (devices[i].Equals(name, StringComparison.OrdinalIgnoreCase) || name.StartsWith(devices[i], StringComparison.OrdinalIgnoreCase)) return i;
-        return WAVE_MAPPER;
-    }
-
-    private nint _handle;
-    private readonly List<nint> _headers = [];
-    private AutoResetEvent? _signal;
-    private Thread? _thread;
-    private volatile bool _running;
-
-    public static bool HasMicrophone() => waveInGetNumDevs() > 0;
-
-    /// <summary>Listens to every microphone at once for a moment and returns each device's peak level (for diagnosing a silent mic).</summary>
-    public static IReadOnlyList<(string Name, double Peak)> ProbeAll(TimeSpan duration)
-    {
-        var names = Devices();
-        var recs = new List<WaveInRecorder>();
-        for (var i = 0; i < names.Count; i++)
-        {
-            var r = new WaveInRecorder(i);
-            try { r.Start(); recs.Add(r); } catch (Exception) { r.Dispose(); }
-        }
-        Thread.Sleep(duration);
-        var result = recs.Select(r => (names[r.DeviceId], r.PeakSinceStart)).ToList();
-        foreach (var r in recs) r.Dispose();
-        return result;
-    }
-
-    /// <summary>Builds a helpful message when the active microphone is silent, naming any device that does hear sound.</summary>
-    public static string SilenceAdvice(int activeDevice)
-    {
-        var active = activeDevice >= 0 && activeDevice < Devices().Count ? Devices()[activeDevice] : "the Windows default microphone";
-        try
-        {
-            var probe = ProbeAll(TimeSpan.FromMilliseconds(1500));
-            var alive = probe.Where(p => p.Peak >= 30).OrderByDescending(p => p.Peak).Select(p => p.Name).ToList();
-            if (alive.Count > 0)
-                return $"I can't hear anything from {active}, but I do hear sound from \"{alive[0]}\". Choose it under Voice › Microphone, or make it your default input in Windows Sound settings";
-        }
-        catch (Exception) { }
-        return $"I can't hear anything from {active}. Check it isn't muted or switched off, and that Windows Settings › Privacy › Microphone allows desktop apps";
-    }
-
-    public void Start()
-    {
-        if (_running) return;
-        if (!HasMicrophone()) throw new InvalidOperationException("No microphone was found.");
-        var fmt = new WAVEFORMATEX { wFormatTag = 1, nChannels = 1, nSamplesPerSec = (uint)SampleRate, wBitsPerSample = 16, nBlockAlign = 2, nAvgBytesPerSec = (uint)SampleRate * 2 };
-        _signal = new AutoResetEvent(false);
-        PeakSinceStart = 0;
-        var rc = waveInOpen(out _handle, DeviceArg(DeviceId), ref fmt, _signal.SafeWaitHandle.DangerousGetHandle(), 0, CALLBACK_EVENT);
-        if (rc != 0) throw new InvalidOperationException($"Could not open the microphone (code {rc}). Check Windows microphone privacy settings.");
-        var size = Marshal.SizeOf<WAVEHDR>();
-        var bytes = SampleRate * 2 * BufferMs / 1000;
-        for (var i = 0; i < BufferCount; i++)
-        {
-            var hdr = Marshal.AllocHGlobal(size);
-            Marshal.StructureToPtr(new WAVEHDR { lpData = Marshal.AllocHGlobal(bytes), dwBufferLength = (uint)bytes }, hdr, false);
-            waveInPrepareHeader(_handle, hdr, size);
-            waveInAddBuffer(_handle, hdr, size);
-            _headers.Add(hdr);
-        }
-        _running = true;
-        _thread = new Thread(Pump) { IsBackground = true, Name = "VoxStride mic" };
-        _thread.Start();
-        waveInStart(_handle);
-    }
-
-    private void Pump()
-    {
-        var size = Marshal.SizeOf<WAVEHDR>();
-        while (_running)
-        {
-            _signal!.WaitOne(200);
-            foreach (var hdr in _headers)
-            {
-                if (!_running) break;
-                var h = Marshal.PtrToStructure<WAVEHDR>(hdr);
-                if ((h.dwFlags & WHDR_DONE) == 0) continue;
-                if (h.dwBytesRecorded > 0)
-                {
-                    var data = new byte[h.dwBytesRecorded];
-                    Marshal.Copy(h.lpData, data, 0, data.Length);
-                    var rms = UtteranceSegmenter.Rms(data);
-                    if (rms > PeakSinceStart) PeakSinceStart = rms;
-                    try { Level?.Invoke(rms); DataAvailable?.Invoke(data); } catch (Exception ex) { Error?.Invoke(ex.Message); }
-                }
-                h.dwFlags &= ~(uint)WHDR_DONE;
-                h.dwBytesRecorded = 0;
-                Marshal.StructureToPtr(h, hdr, false);
-                if (_running) waveInAddBuffer(_handle, hdr, size);
-            }
-        }
-    }
-
-    public void Stop()
-    {
-        if (!_running) return;
-        _running = false;
-        _signal?.Set();
-        _thread?.Join(1000);
-        waveInReset(_handle);
-        var size = Marshal.SizeOf<WAVEHDR>();
-        foreach (var hdr in _headers)
-        {
-            waveInUnprepareHeader(_handle, hdr, size);
-            Marshal.FreeHGlobal(Marshal.PtrToStructure<WAVEHDR>(hdr).lpData);
-            Marshal.FreeHGlobal(hdr);
-        }
-        _headers.Clear();
-        waveInClose(_handle);
-        _handle = 0;
-        _signal?.Dispose();
-        _signal = null;
-    }
-
-    public void Dispose() => Stop();
-}
-
 /// <summary>
 /// Cloud speech recognition for accented and mixed-language speech: records only while VoxStride is listening,
 /// splits speech at pauses, and transcribes each utterance with OpenAI or Gemini. Shows "…" while an utterance is
 /// being transcribed (a pending segment, so nothing can commit early). Never runs in standby.
 /// </summary>
-public sealed class CloudSpeechRecognizer : ISpeechRecognizer
+public sealed class CloudSpeechRecognizer : ISpeechRecognizer, ISpeechDiagnostics
 {
     private readonly ITranscriber _transcriber;
-    private readonly WaveInRecorder _mic;
+    private readonly AudioHub _mic;
+    private readonly Action<string>? _log;
     private readonly Lock _gate = new();
     private Channel<(AudioSegment seg, string id, Guid session)>? _queue;
     private Task? _worker;
     private UtteranceSegmenter? _segmenter;
+    private AudioLease? _lease;
+    private MicWatchdog? _watchdog;
     private Guid _session;
     private long _sequence;
     private int _counter;
     private string? _openId;
     private string _context = "";
-    private Timer? _silenceTimer;
+    private int _transcribed;
 
-    public CloudSpeechRecognizer(ITranscriber transcriber, double sensitivity = 3.0, int deviceId = -1)
+    public CloudSpeechRecognizer(ITranscriber transcriber, AudioHub microphone, double sensitivity = 3.0, Action<string>? log = null)
     {
         _transcriber = transcriber;
-        _mic = new WaveInRecorder(deviceId);
+        _mic = microphone;
+        _log = log;
         Sensitivity = sensitivity;
-        _mic.DataAvailable += d => { lock (_gate) _segmenter?.Push(d); };
-        _mic.Error += m => Error?.Invoke(m);
+        _mic.DeviceError += m => { if (_lease is not null) Error?.Invoke(m); };
     }
 
     public double Sensitivity { get; }
     public string Name => "Cloud speech (" + _transcriber.Name + ")";
     public event Action<TranscriptEvent>? Transcript;
     public event Action<string>? Error;
-    public event Action<double>? Level { add => _mic.Level += value; remove => _mic.Level -= value; }
+    public event Action<string>? Hint;
 
     public Task StartAsync(Guid sessionId, CancellationToken ct)
     {
         lock (_gate)
         {
             _session = sessionId;
-            if (_segmenter is not null) return Task.CompletedTask; // already listening; session switched
+            if (_lease is not null) return Task.CompletedTask; // already listening; session switched
+            var lease = _mic.Acquire("cloud-dictation"); // throws a clear message if the microphone can't be opened
             _context = "";
-            _segmenter = new UtteranceSegmenter(_mic.SampleRate) { Sensitivity = Sensitivity };
-            _segmenter.SpeechStarted += startMs =>
+            _transcribed = 0;
+            var segmenter = new UtteranceSegmenter(lease.SampleRate) { Sensitivity = Sensitivity };
+            segmenter.SpeechStarted += startMs =>
             {
                 var id = "c-" + Interlocked.Increment(ref _counter);
                 _openId = id;
                 Raise(new TranscriptEvent(_session, id, Interlocked.Increment(ref _sequence), 1, false, "…", startMs, startMs));
             };
-            _segmenter.SpeechDiscarded += () =>
+            segmenter.SpeechDiscarded += () =>
             {
                 if (_openId is { } id) Raise(new TranscriptEvent(_session, id, Interlocked.Increment(ref _sequence), 2, true, "", 0, 0));
                 _openId = null;
             };
-            _segmenter.SegmentReady += seg =>
+            segmenter.SegmentReady += seg =>
             {
                 var id = _openId ?? "c-" + Interlocked.Increment(ref _counter);
                 _openId = null;
                 _queue?.Writer.TryWrite((seg, id, _session));
             };
+            _segmenter = segmenter;
             _queue = Channel.CreateUnbounded<(AudioSegment, string, Guid)>(new UnboundedChannelOptions { SingleReader = true });
             _worker = Task.Run(() => WorkAsync(_queue.Reader));
+            lease.Data += d => { lock (_gate) _segmenter?.Push(d); };
+            _lease = lease;
+            _watchdog = new MicWatchdog(lease, m => Error?.Invoke(m), m => Hint?.Invoke(m));
+            _log?.Invoke($"speech-start engine=cloud ({_transcriber.Name}) device=\"{lease.DeviceLabel}\"");
         }
-        try { _mic.Start(); }
-        catch (Exception)
-        {
-            lock (_gate) { _segmenter = null; _queue?.Writer.TryComplete(); }
-            throw;
-        }
-        _silenceTimer?.Dispose();
-        _silenceTimer = new Timer(_ =>
-        {
-            if (_segmenter is not null && _mic.PeakSinceStart < 30)
-                Error?.Invoke(WaveInRecorder.SilenceAdvice(_mic.DeviceId));
-        }, null, TimeSpan.FromSeconds(6), Timeout.InfiniteTimeSpan);
         return Task.CompletedTask;
     }
 
@@ -267,9 +90,9 @@ public sealed class CloudSpeechRecognizer : ISpeechRecognizer
             TranscriptionResult r;
             try { r = await _transcriber.TranscribeAsync(wav, _context, CancellationToken.None).ConfigureAwait(false); }
             catch (Exception ex) { r = new TranscriptionResult(false, "", ex.Message); }
-            if (!r.Ok) Error?.Invoke("I couldn't transcribe that part (" + r.Error + ")");
+            if (!r.Ok) { _log?.Invoke("transcribe-failed: " + r.Error); Error?.Invoke("I couldn't transcribe that part (" + r.Error + ")"); }
             var text = r.Text;
-            if (text.Length > 0) _context = (_context + " " + text).Trim();
+            if (text.Length > 0) { _context = (_context + " " + text).Trim(); Interlocked.Increment(ref _transcribed); }
             Raise(new TranscriptEvent(session, id, Interlocked.Increment(ref _sequence), 2, true, text, seg.StartMs, seg.EndMs, r.Ok ? 0.95 : 0));
         }
     }
@@ -280,24 +103,31 @@ public sealed class CloudSpeechRecognizer : ISpeechRecognizer
     {
         Channel<(AudioSegment, string, Guid)>? q;
         Task? worker;
-        _silenceTimer?.Dispose();
-        _mic.Stop();
+        AudioLease? lease;
         lock (_gate)
         {
+            lease = _lease;
+            if (lease is null) return;
+            _lease = null;
+            _watchdog?.Dispose();
+            _watchdog = null;
             if (flushTimeout > TimeSpan.Zero) _segmenter?.Flush();
             _segmenter = null;
             q = _queue; worker = _worker;
             _queue = null; _worker = null;
         }
+        lease.Dispose(); // microphone released before waiting on the network
         q?.Writer.TryComplete();
         if (worker is not null && flushTimeout > TimeSpan.Zero)
-            await Task.WhenAny(worker, Task.Delay(flushTimeout, ct)).ConfigureAwait(false);
+        {
+            try { await Task.WhenAny(worker, Task.Delay(flushTimeout, ct)).ConfigureAwait(false); } catch (OperationCanceledException) { }
+        }
+        _log?.Invoke($"speech-session engine=cloud device=\"{lease.DeviceLabel}\" ms={(long)lease.Elapsed.TotalMilliseconds} buffers={lease.Buffers} peak={lease.Peak:0} transcribed={_transcribed}");
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        _mic.Dispose();
-        return ValueTask.CompletedTask;
+        try { await StopAsync(TimeSpan.Zero, CancellationToken.None).ConfigureAwait(false); } catch (Exception) { }
     }
 }
 

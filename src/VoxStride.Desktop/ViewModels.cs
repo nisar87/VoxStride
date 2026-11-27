@@ -119,7 +119,7 @@ public sealed class AssistantViewModel : Observable
             ProgressText = $"{c} of {e.Total}";
         }
         else if (e.Phase is "done" or "result") { ProgressVisible = false; ProgressText = ""; }
-        if (e.Phase is "ack" or "step-result" or "result" or "approval" or "clarify" or "no-provider" or "cancelled" or "recovery" or "wake-unavailable" or "preview")
-            AddActivity(e.Message, e.Phase switch { "result" => "✔", "cancelled" => "■", "approval" => "?", "recovery" => "!", _ => "•" });
+        if (e.Phase is "ack" or "step-result" or "result" or "approval" or "clarify" or "no-provider" or "cancelled" or "recovery" or "wake-unavailable" or "speech-hint" or "preview")
+            AddActivity(e.Message, e.Phase switch { "result" => "✔", "cancelled" => "■", "approval" => "?", "recovery" => "!", "speech-hint" => "🎙", _ => "•" });
     }
 }

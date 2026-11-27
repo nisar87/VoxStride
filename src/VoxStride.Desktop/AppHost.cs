@@ -92,6 +92,8 @@ public sealed class AppHost : IAsyncDisposable
     public RunCoordinator Runs { get; }
     public ConversationCoordinator Conversation { get; }
     public ISpeechRecognizer Recognizer { get; }
+    /// <summary>The one owner of the microphone; wake word, dictation and tests all take leases from it.</summary>
+    public AudioHub Microphone { get; }
     public NaturalSpeechSynthesizer? Speech { get; }
     public string SpeechEngineLabel { get; private set; } = "off";
     public string MicrophoneLabel { get; private set; } = "none";
@@ -137,7 +139,12 @@ public sealed class AppHost : IAsyncDisposable
             new RunOptions { MaxSteps = settings.MaxSteps, MaxDuration = TimeSpan.FromSeconds(settings.MaxRunSeconds), MaxTokensPerRun = settings.MaxTokensPerRun, SpeakResults = settings.SpeakResults }, time);
 
         var control = new ControlPhraseDetector(new ControlPhraseOptions { AllowPlainProceed = settings.AllowPlainProceed });
-        Recognizer = enableSpeech ? CreateRecognizer() : new NullRecognizer();
+        Microphone = new AudioHub(() => OpenMicrophone(Settings.MicrophoneName), DiagnosticsLog.Write);
+        var label = "off";
+        Recognizer = enableSpeech ? CreateRecognizer(Microphone, out label) : new NullRecognizer();
+        SpeechEngineLabel = label;
+        if (Recognizer is ISpeechDiagnostics diag)
+            diag.Hint += hint => Events.Publish(Guid.Empty, AgentState.Listening, "speech-hint", hint + ".", canCancel: true);
         var cloudSpeech = Recognizer is CloudSpeechRecognizer;
         Conversation = new ConversationCoordinator(Recognizer, Speech, Runs, control, new CoordinatorOptions
         {
@@ -149,46 +156,98 @@ public sealed class AppHost : IAsyncDisposable
         }, time);
     }
 
-    /// <summary>Picks the speech recognizer: cloud (better for accents and mixed languages) only with explicit consent and a key.</summary>
-    private ISpeechRecognizer CreateRecognizer()
+    /// <summary>Opens the chosen microphone, falling back to the Windows default if it's no longer connected.</summary>
+    private static WaveInRecorder OpenMicrophone(string? name)
     {
+        var id = WaveInRecorder.ResolveDevice(name);
+        if (id < 0 && !string.IsNullOrWhiteSpace(name)) DiagnosticsLog.Write($"mic-missing saved=\"{name}\" using=default");
+        return new WaveInRecorder(id);
+    }
+
+    public static readonly string[] ControlPhrases = ["VoxStride execute", "VoxStride proceed", "assistant proceed", "execute now", "cancel", "never mind", "scratch that", "undo last sentence", "stop listening"];
+
+    /// <summary>The cloud transcriber the settings allow, or null (needs explicit consent and an OpenAI or Gemini key).</summary>
+    private ITranscriber? CloudTranscriber()
+    {
+        if (!Settings.CloudSpeechConsent || Settings.SpeechEngine == SpeechEngine.Windows) return null;
         var openAiKey = Secrets.Load(ProviderSelector.SecretName(ProviderKind.OpenAI));
         var geminiKey = Secrets.Load(ProviderSelector.SecretName(ProviderKind.Gemini));
-        ITranscriber? cloud = null;
-        if (Settings.CloudSpeechConsent)
+        var geminiModel = Settings.Models.GetValueOrDefault(ProviderKind.Gemini, ProviderFactory.DefaultModel(ProviderKind.Gemini));
+        return Settings.SpeechEngine switch
         {
-            cloud = Settings.SpeechEngine switch
+            SpeechEngine.OpenAI when !string.IsNullOrEmpty(openAiKey) => new OpenAITranscriber(openAiKey),
+            SpeechEngine.Gemini when !string.IsNullOrEmpty(geminiKey) => new GeminiTranscriber(geminiKey, geminiModel),
+            SpeechEngine.Auto or SpeechEngine.OpenAI or SpeechEngine.Gemini when !string.IsNullOrEmpty(openAiKey) => new OpenAITranscriber(openAiKey),
+            SpeechEngine.Auto or SpeechEngine.OpenAI or SpeechEngine.Gemini when !string.IsNullOrEmpty(geminiKey) => new GeminiTranscriber(geminiKey, geminiModel),
+            _ => null,
+        };
+    }
+
+    /// <summary>True when only the basic offline engine is available (no cloud key/consent).</summary>
+    public bool UsingBasicEngine => Recognizer is WindowsSpeechRecognizer;
+
+    /// <summary>
+    /// Builds the speech recognizer on the given microphone: cloud speech (accurate with accents) when allowed,
+    /// otherwise the offline Windows engine. Used for both live listening and the speech test, so the test
+    /// exercises exactly the same pipeline.
+    /// </summary>
+    private ISpeechRecognizer CreateRecognizer(AudioHub microphone, out string label)
+    {
+        if (CloudTranscriber() is { } cloud)
+        {
+            label = cloud.Name;
+            return new CloudSpeechRecognizer(cloud, microphone, Settings.MicSensitivity, DiagnosticsLog.Write);
+        }
+        label = "Windows offline (" + (SpeechEnvironment.PickRecognizer(Settings.SpeechCulture)?.Culture.Name ?? Settings.SpeechCulture) + ")";
+        return new WindowsSpeechRecognizer(Settings.SpeechCulture, ControlPhrases, microphone, DiagnosticsLog.Write);
+    }
+
+    public sealed record SpeechTestResult(string Engine, string Device, long Buffers, double Peak, string Heard, IReadOnlyList<string> Problems);
+
+    /// <summary>
+    /// End-to-end check: listens on the given microphone with the real recognizer for a few seconds and returns the
+    /// words it understood, plus what the microphone delivered. Only runs while no instruction is in progress.
+    /// </summary>
+    public async Task<SpeechTestResult> TestSpeechAsync(string? microphoneName, TimeSpan duration, Action<double> level, Action<string> heard, CancellationToken ct)
+    {
+        if (!_conversationIdle) throw new InvalidOperationException("Finish or cancel the current instruction first.");
+        await StopWakeAsync();
+        var problems = new List<string>();
+        var text = new System.Text.StringBuilder();
+        try
+        {
+            using var hub = new AudioHub(() => OpenMicrophone(microphoneName), DiagnosticsLog.Write);
+            hub.Level += level;
+            using var meter = hub.Acquire("speech-test");
+            var rec = CreateRecognizer(hub, out var engine);
+            rec.Error += problems.Add;
+            if (rec is ISpeechDiagnostics d) d.Hint += problems.Add;
+            rec.Transcript += e =>
             {
-                SpeechEngine.OpenAI when !string.IsNullOrEmpty(openAiKey) => new OpenAITranscriber(openAiKey),
-                SpeechEngine.Gemini when !string.IsNullOrEmpty(geminiKey) => new GeminiTranscriber(geminiKey, Settings.Models.GetValueOrDefault(ProviderKind.Gemini, ProviderFactory.DefaultModel(ProviderKind.Gemini))),
-                SpeechEngine.Auto when !string.IsNullOrEmpty(openAiKey) => new OpenAITranscriber(openAiKey),
-                SpeechEngine.Auto when !string.IsNullOrEmpty(geminiKey) => new GeminiTranscriber(geminiKey, Settings.Models.GetValueOrDefault(ProviderKind.Gemini, ProviderFactory.DefaultModel(ProviderKind.Gemini))),
-                _ => null,
+                if (!e.IsFinal || string.IsNullOrWhiteSpace(e.Text)) return;
+                lock (text) { text.Append(text.Length > 0 ? " " : "").Append(e.Text.Trim()); heard(text.ToString()); }
             };
-        }
-        var device = WaveInRecorder.ResolveDevice(Settings.MicrophoneName);
-        MicrophoneLabel = device < 0 ? "Windows default microphone" : WaveInRecorder.Devices()[device];
-        if (cloud is not null && WaveInRecorder.HasMicrophone())
-        {
-            SpeechEngineLabel = cloud.Name;
-            return new CloudSpeechRecognizer(cloud, Settings.MicSensitivity, device);
-        }
-        var offline = new WindowsSpeechRecognizer(Settings.SpeechCulture, ["VoxStride execute", "VoxStride proceed", "assistant proceed", "execute now", "cancel", "never mind", "scratch that", "undo last sentence", "stop listening"], device);
-        if (Settings.SpeechEngine != SpeechEngine.Windows && WinRtSpeechRecognizer.IsAvailable())
-        {
-            SpeechEngineLabel = "Windows online dictation (" + Settings.SpeechCulture + ")";
-            MicrophoneLabel = "Windows default microphone (set in Windows Sound settings)";
-            var fb = new FallbackSpeechRecognizer(new WinRtSpeechRecognizer(Settings.SpeechCulture), offline);
-            fb.FellBack += reason =>
+            try
             {
-                SpeechEngineLabel = "Windows (offline)";
-                DiagnosticsLog.Write("speech-fallback: " + reason);
-                Events.Publish(Guid.Empty, AgentState.Standby, "wake-unavailable", "Better Windows dictation couldn't start: " + reason + " Using the basic offline engine for now.", canCancel: false);
-            };
-            return fb;
+                await rec.StartAsync(Guid.NewGuid(), ct);
+                await Task.Delay(duration, ct);
+                await rec.StopAsync(rec is CloudSpeechRecognizer ? TimeSpan.FromSeconds(8) : TimeSpan.FromSeconds(2), ct);
+            }
+            finally { await rec.DisposeAsync(); }
+            string result;
+            lock (text) result = text.ToString();
+            DiagnosticsLog.Write($"speech-test engine={engine} device=\"{meter.DeviceLabel}\" buffers={meter.Buffers} peak={meter.Peak:0} words={result.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length} problems={problems.Count}");
+            return new SpeechTestResult(engine, meter.DeviceLabel, meter.Buffers, meter.Peak, result, problems);
         }
-        SpeechEngineLabel = "Windows (offline)";
-        return offline;
+        finally { _ = StartWakeAsync(); }
+    }
+
+    /// <summary>Applies a newly chosen microphone without a restart.</summary>
+    public void MicrophoneChanged()
+    {
+        DiagnosticsLog.Write($"mic-selected \"{Settings.MicrophoneName ?? "Windows default"}\"");
+        MicrophoneLabel = WaveInRecorder.DescribeDevice(WaveInRecorder.ResolveDevice(Settings.MicrophoneName));
+        try { Microphone.Reopen(); } catch (Exception ex) { DiagnosticsLog.Write("mic-reopen failed: " + ex.Message); }
     }
 
     private ICloudVoice? CreateCloudVoice()
@@ -202,6 +261,7 @@ public sealed class AppHost : IAsyncDisposable
 
     public async Task StartAsync(CancellationToken ct)
     {
+        MicrophoneLabel = WaveInRecorder.DescribeDevice(WaveInRecorder.ResolveDevice(Settings.MicrophoneName));
         DiagnosticsLog.Write($"start v{UpdateService.CurrentVersion.ToString(3)} os={Environment.OSVersion.Version} speech={SpeechEngineLabel} mic={MicrophoneLabel} micDevices=[{string.Join(" | ", WaveInRecorder.Devices())}] provider={Settings.ActiveProvider?.ToString() ?? "none"} cloudSpeechConsent={Settings.CloudSpeechConsent}");
         _ = Apps.BuildAsync(ct); // catalog builds in the background; direct disk queries never wait for it
         await Rules.RefreshAsync(ct);
@@ -259,7 +319,7 @@ public sealed class AppHost : IAsyncDisposable
 
     private WindowsWakeWordDetector CreateWake()
     {
-        var w = new WindowsWakeWordDetector(Settings.SpeechCulture, WaveInRecorder.ResolveDevice(Settings.MicrophoneName));
+        var w = new WindowsWakeWordDetector(Settings.SpeechCulture, Microphone, DiagnosticsLog.Write);
         string? trailing = null;
         w.TrailingText += t => trailing = t;
         w.WakeDetected += detectedAt =>
@@ -269,8 +329,13 @@ public sealed class AppHost : IAsyncDisposable
             {
                 await Task.Delay(30);
                 var text = Interlocked.Exchange(ref trailing, null);
-                await w.StopAsync(); // free the mic for dictation
+                // Hold the microphone open across the handover so dictation starts on the same open device
+                // instead of closing and reopening it (which loses the first words).
+                var bridge = Microphone.Acquire("handoff");
+                await w.StopAsync();
                 Conversation.ActivateFromWake(text);
+                await Task.Delay(2000);
+                bridge.Dispose();
             });
         };
         return w;
@@ -293,6 +358,7 @@ public sealed class AppHost : IAsyncDisposable
         await Conversation.DisposeAsync();
         if (Wake is not null) await Wake.DisposeAsync();
         await Recognizer.DisposeAsync();
+        Microphone.Dispose();
         await Browser.DisposeAsync();
         Speech?.Dispose();
         Store.Dispose();

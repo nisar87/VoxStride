@@ -1,0 +1,17 @@
+# ADR-0009: One shared microphone pipeline; no Windows online dictation
+
+- Status: accepted (2026-11-27)
+- Context: in 0.2.x, voice input on the owner's PC produced no words. The log showed two independent root causes.
+  1. **Windows online dictation (`Windows.Media.SpeechRecognition`) can't work in this build.** Microsoft documents that these APIs need MSIX package identity and are unavailable to unpackaged apps. VoxStride ships as an Inno Setup installer, so the dictation topic compile always failed with 0x80045509 ("speech privacy policy was not accepted"), even with Online speech recognition turned on.
+  2. **The offline engine received almost no audio.** SAPI treats a read that returns fewer bytes than requested as end of stream (ISpSREngineSite::Read). The old `BlockingAudioStream` returned one 50 ms capture buffer per read, so the engine stopped after the first buffer and recognized nothing. Because the engine then completed on its own, the recognizer's stop path returned early and **never closed the waveIn recorder**, so open microphone handles leaked. The wake detector had the same fault.
+  Contributing factor: wake word, dictation, cloud speech and the mic test each opened the microphone separately, and the mic test measured level only, so a "working" test said nothing about the speech path.
+- Decision:
+  - `AudioHub` (Core) is the single owner of the capture device. Consumers take `AudioLease`s. The device opens on the first lease and closes on the last. Each lease records buffers and peak level, which are logged per session (`mic-open`, `mic-lease`, `mic-close`, `speech-session`).
+  - `PcmPipeStream` (Core) feeds SAPI. Reads block until the full request is available; a short read happens only after `Complete()` (real end of audio). A bounded ring drops the oldest audio if the engine stalls.
+  - Recognizers release their lease on every path: stop, cancel, the engine ending on its own, a stop timeout, and dispose. Engine calls never run under the recognizer's lock, because engine event threads take the same lock.
+  - Wake → dictation handover holds a short "handoff" lease, so the device is not closed and reopened between them.
+  - `MicWatchdog` distinguishes *no buffers at all* (a real fault: reported as an error) from *only silence* (possibly a quiet room or a headset that gates silence to zero: a non-blocking hint).
+  - The Windows online dictation engine and the WinRT target framework are removed. Speech engines are now cloud STT (OpenAI/Gemini, explicit consent and a key) or offline System.Speech.
+  - **Settings › Voice › Test speech** runs the real recognizer on the selected microphone and shows the words it understood.
+- Consequences: without an OpenAI or Gemini key, recognition uses the offline engine, which is weak with non-native accents. The app says so plainly instead of trying an engine that cannot work. Re-enabling Windows online dictation would require MSIX packaging with identity (a signing certificate). That is tracked as an option, not a hidden fallback. The install and update downloads shrink because the WinRT projection assembly is no longer shipped.
+- Evidence: `tests/VoxStride.Tests/AudioPipelineTests.cs` (stream semantics, hub lifecycle, health) and `tests/VoxStride.Tests.Windows/SpeechPipelineTests.cs`, which feeds synthesized speech in real time through the hub into the offline engine on Windows CI and asserts that words are recognized and the microphone is released.

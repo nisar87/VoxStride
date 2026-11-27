@@ -51,6 +51,8 @@ VoxStride checks GitHub for new versions, verifies each download's checksum, and
 ## 7. Troubleshooting
 - **"No Windows speech recognizer is installed"**: go to Windows Settings › Time & language › Speech and add English speech recognition, or use typed commands.
 - **Wake phrase not detected**: speak a little slower, use the hotkey, or check the microphone in Windows Sound settings.
+- **VoxStride doesn't seem to hear you**: open **Voice**, pick the microphone you speak into, and click **Test speech**. It listens for 6 seconds with the real speech engine and shows the words it understood. It also tells you whether the microphone sent no audio, only silence, or sound the engine couldn't understand. A new microphone choice applies when you click **Save**, without a restart.
+- **The words are wrong**: the offline Windows engine is weak with non-native accents. Cloud speech (an OpenAI or Gemini key plus **Use cloud speech recognition**) is far more accurate. A Claude key can't transcribe audio. Windows online dictation (Win+H) isn't available to installer-based apps like VoxStride.
 - **Provider errors**: "rejected the API key" means re-enter the key. "rate-limiting" means wait a moment. "model isn't available" means choose a model from the list and click Test connection.
 - **Browser tasks**: Microsoft Edge must be installed (it ships with Windows 11). Sign in to ChatGPT inside the VoxStride browser window.
 - **Diagnostics**: see About & diagnostics for timings, memory and configuration. **Export redacted diagnostics** writes a file without instructions, paths, keys or audio.

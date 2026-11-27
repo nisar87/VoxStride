@@ -91,7 +91,11 @@ public partial class App : Application
         h.Conversation.TranscriptChanged += (f, i) => Dispatcher.BeginInvoke(() => { _vm.FinalTranscript = f; _vm.InterimTranscript = i; });
         h.Conversation.Notice += n => { DiagnosticsLog.Write("notice: " + n); Dispatcher.BeginInvoke(() => { _vm.Status = n; _vm.AddActivity(n); }); };
         h.Conversation.StateChanged += s => DiagnosticsLog.Write("state: " + s);
-        h.Events.Published += ev => { if (ev.Phase is "result" or "no-provider" or "cancelled" or "recovery" or "wake-unavailable") DiagnosticsLog.Write($"{ev.Phase}: {ev.State}"); };
+        h.Events.Published += ev =>
+        {
+            if (ev.Phase is "wake-unavailable" or "speech-hint" or "recovery" or "no-provider") DiagnosticsLog.Write($"{ev.Phase}: {ev.Message}");
+            else if (ev.Phase is "result" or "cancelled") DiagnosticsLog.Write($"{ev.Phase}: {ev.State}");
+        };
         h.Conversation.Committed += c => Dispatcher.BeginInvoke(() => _vm.AddActivity("You: " + c.FinalizedTranscript, "🗣"));
         h.Broker.Blocked += (tool, reason) => { DiagnosticsLog.Write($"blocked: {tool} {reason}"); Dispatcher.BeginInvoke(() => _vm.AddActivity($"Blocked {tool}: {reason}", "⛔")); };
         DispatcherUnhandledException += (_, a) => DiagnosticsLog.Write("ui-exception: " + a.Exception.GetType().Name + ": " + a.Exception.Message);

@@ -150,7 +150,7 @@ public partial class MainWindow : Window
 
         WakeBox.IsChecked = s.WakeWordEnabled; YieldBox.IsChecked = s.YieldMicToOtherApps; PlainProceedBox.IsChecked = s.AllowPlainProceed; SpeakBox.IsChecked = s.SpeakResults;
         CuesBox.IsChecked = s.AudioCues; OverlayBox.IsChecked = s.ShowOverlay;
-        var cultures = WinRtSpeechRecognizer.Languages().Select(l => l.Tag).Concat(SpeechEnvironment.RecognizerCultures()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var cultures = SpeechEnvironment.RecognizerCultures().Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         CultureBox.ItemsSource = cultures.Count > 0 ? cultures : new List<string> { s.SpeechCulture };
         CultureBox.SelectedItem = cultures.Contains(s.SpeechCulture) ? s.SpeechCulture : cultures.FirstOrDefault();
         var voices = SpeechEnvironment.Voices();
@@ -160,7 +160,7 @@ public partial class MainWindow : Window
             ? "No Windows speech recognizer is installed. Install an English speech pack (Settings › Time & language › Speech) to use voice. Typed commands still work."
             : $"Installed recognizers: {string.Join(", ", cultures)}. Voices: {voices.Count}.";
 
-        var mics = new List<string> { "Windows default microphone" };
+        var mics = new List<string> { WaveInRecorder.DescribeDevice(WaveInRecorder.WaveMapper) };
         mics.AddRange(WaveInRecorder.Devices());
         MicBox.ItemsSource = mics;
         MicBox.SelectedItem = s.MicrophoneName is { } mn && mics.Contains(mn) ? mn : mics[0];
@@ -172,7 +172,11 @@ public partial class MainWindow : Window
         CloudVoiceBox.SelectedItem = s.CloudVoiceName;
         var hasOpenAi = _app.Host!.Secrets.Load(ProviderSelector.SecretName(ProviderKind.OpenAI)) is { Length: > 0 };
         var hasGemini = _app.Host.Secrets.Load(ProviderSelector.SecretName(ProviderKind.Gemini)) is { Length: > 0 };
-        EngineInfo.Text = $"Currently using: {_app.Host.SpeechEngineLabel}." + (!hasOpenAi && !hasGemini ? " Add an OpenAI or Gemini key under Reasoning providers to enable cloud speech." : "");
+        EngineInfo.Text = $"Currently using: {_app.Host.SpeechEngineLabel}. " + (_app.Host.UsingBasicEngine
+            ? (!hasOpenAi && !hasGemini
+                ? "The offline Windows engine works without a key but is weak with accents. For accurate recognition of your accent and mixed Urdu/English, add an OpenAI or Gemini key under Reasoning providers and tick cloud speech above. (A Claude key can't transcribe audio.)"
+                : "Tick \"Use cloud speech recognition\" above for much better accuracy with accents.")
+            : "Your voice is sent for transcription only while you're giving an instruction.");
         AutoUpdateBox.IsChecked = s.AutoCheckUpdates;
         AutoInstallBox.IsChecked = s.AutoInstallUpdates;
         RefreshUpdateUi();
@@ -282,7 +286,8 @@ public partial class MainWindow : Window
         s.WakeWordEnabled = WakeBox.IsChecked == true; s.YieldMicToOtherApps = YieldBox.IsChecked == true; s.AllowPlainProceed = PlainProceedBox.IsChecked == true;
         s.SpeakResults = SpeakBox.IsChecked == true; s.AudioCues = CuesBox.IsChecked == true; s.ShowOverlay = OverlayBox.IsChecked == true;
         if (VoiceBox.SelectedItem is string v) s.Voice = v;
-        var engineBefore = (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.MicrophoneName, s.SpeechCulture);
+        var engineBefore = (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.SpeechCulture);
+        var micBefore = s.MicrophoneName;
         s.MicrophoneName = MicBox.SelectedIndex <= 0 ? null : MicBox.SelectedItem as string;
         if (CultureBox.SelectedItem is string c) s.SpeechCulture = c;
         s.CloudSpeechConsent = CloudSpeechBox.IsChecked == true;
@@ -292,7 +297,8 @@ public partial class MainWindow : Window
         if (CloudVoiceBox.SelectedItem is string cv) s.CloudVoiceName = cv;
         s.Save();
         _app.Host!.RefreshVoice();
-        if (engineBefore != (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.MicrophoneName, s.SpeechCulture))
+        if (!string.Equals(micBefore, s.MicrophoneName, StringComparison.Ordinal)) _app.Host.MicrophoneChanged(); // applies immediately
+        if (engineBefore != (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.SpeechCulture))
         {
             if (MessageBox.Show(this, "The new speech settings take effect after VoxStride restarts. Restart now?", "VoxStride", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             { _app.RestartApp(); return; }
@@ -310,40 +316,48 @@ public partial class MainWindow : Window
 
     private bool _micTesting;
 
-    /// <summary>Records 5 seconds from the selected microphone and shows the live level, so you can see it's working.</summary>
+    /// <summary>
+    /// End-to-end speech test: listens on the selected microphone with the real speech engine for 6 seconds and shows
+    /// the words it understood. A working level bar alone doesn't prove VoxStride can hear you; this does.
+    /// </summary>
     private async void TestMic_Click(object sender, RoutedEventArgs e)
     {
         if (_micTesting) return;
         _micTesting = true;
-        var device = MicBox.SelectedIndex <= 0 ? -1 : MicBox.SelectedIndex - 1;
-        var name = MicBox.SelectedItem as string ?? "microphone";
-        double peak = 0;
-        var rec = new WaveInRecorder(device);
-        rec.Level += l =>
-        {
-            peak = Math.Max(peak, l);
-            Dispatcher.BeginInvoke(() => MicLevel.Value = Math.Min(100, l / 60.0));
-        };
+        TestSpeechButton.IsEnabled = false;
+        var micName = MicBox.SelectedIndex <= 0 ? null : MicBox.SelectedItem as string;
+        var shown = MicBox.SelectedItem as string ?? "microphone";
         try
         {
-            if (_app.Host!.Wake is not null) await _app.Host.StopWakeAsync();
-            rec.Start();
-            MicTestText.Text = $"Listening on \"{name}\" for 5 seconds — say something…";
-            await Task.Delay(5000);
-            rec.Stop();
-            MicTestText.Text = peak < 30 ? $"✖ No sound at all from \"{name}\". Pick another microphone above, check it isn't muted, and allow desktop apps in Windows Settings › Privacy › Microphone."
-                : peak < 600 ? $"⚠ \"{name}\" works but is very quiet (peak {peak:0}). Move closer or raise its level in Windows Sound settings."
-                : $"✔ \"{name}\" is working (peak {peak:0}). Click Save to use it.";
-            DiagnosticsLog.Write($"mic-test device={name} peak={peak:0}");
+            MicTestText.Text = $"Listening on \"{shown}\" for 6 seconds — say something like \"open Notepad\"…";
+            var r = await _app.Host!.TestSpeechAsync(micName, TimeSpan.FromSeconds(6),
+                level => Dispatcher.BeginInvoke(() => MicLevel.Value = Math.Min(100, level / 60.0)),
+                heard => Dispatcher.BeginInvoke(() => MicTestText.Text = $"Heard so far: \"{heard}\""),
+                CancellationToken.None);
+            MicTestText.Text = Describe(r, shown);
         }
-        catch (Exception ex) { MicTestText.Text = "✖ " + ex.Message; DiagnosticsLog.Write("mic-test error: " + ex.Message); }
+        catch (Exception ex) { MicTestText.Text = "✖ " + ex.Message; DiagnosticsLog.Write("speech-test error: " + ex.Message); }
         finally
         {
-            rec.Dispose();
             MicLevel.Value = 0;
+            TestSpeechButton.IsEnabled = true;
             _micTesting = false;
-            _ = _app.Host!.StartWakeAsync();
         }
+    }
+
+    private static string Describe(AppHost.SpeechTestResult r, string shown)
+    {
+        if (r.Buffers == 0)
+            return $"✖ \"{shown}\" didn't send any audio. Another app may be using it exclusively, or it's disconnected. Try another microphone above.";
+        if (r.Peak < VoxStride.Core.Voice.MicHealthCheck.SilenceThreshold)
+            return $"✖ No sound at all from \"{shown}\". Check it isn't muted, or pick another microphone above.";
+        if (r.Heard.Length > 0)
+            return $"✔ VoxStride heard: \"{r.Heard}\"  ({r.Engine}, {r.Device})." + (r.Engine.StartsWith("Windows offline", StringComparison.Ordinal)
+                ? " If those aren't quite your words, the offline engine is struggling with your accent — cloud speech fixes that."
+                : "");
+        var quiet = r.Peak < 600 ? " The sound was very quiet — move closer or raise the microphone level in Windows Sound settings." : "";
+        var problem = r.Problems.Count > 0 ? " (" + r.Problems[^1] + ")" : "";
+        return $"⚠ The microphone works (level {r.Peak:0}) but the speech engine ({r.Engine}) didn't understand any words.{quiet}{problem}";
     }
 
     private void OpenLogs_Click(object sender, RoutedEventArgs e)

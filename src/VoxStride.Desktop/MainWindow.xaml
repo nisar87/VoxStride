@@ -180,7 +180,8 @@
                             <TextBlock Text="Microphone" FontWeight="SemiBold" FontSize="15" />
                             <StackPanel Orientation="Horizontal" Margin="0,6,0,4">
                                 <ComboBox x:Name="MicBox" Width="300" AutomationProperties.Name="Microphone" />
-                                <Button Content="Test microphone" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="TestMic_Click" />
+                                <Button x:Name="TestSpeechButton" Content="Test speech" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="TestMic_Click"
+                                        ToolTip="Listens for 6 seconds with the real speech engine and shows the words it understood" />
                             </StackPanel>
                             <ProgressBar x:Name="MicLevel" Height="10" Maximum="100" Width="300" HorizontalAlignment="Left" Margin="0,4,0,2" AutomationProperties.Name="Microphone level" />
                             <TextBlock x:Name="MicTestText" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,12" />
@@ -192,10 +193,9 @@
                                 <TextBlock Text="Engine" VerticalAlignment="Center" Width="90" />
                                 <ComboBox x:Name="EngineBox" Width="260">
                                     <ComboBoxItem Content="Automatic (best available)" Tag="Auto" />
-                                    <ComboBoxItem Content="Windows online dictation (free, no key)" Tag="WindowsOnline" />
                                     <ComboBoxItem Content="OpenAI (gpt-transcribe, needs key)" Tag="OpenAI" />
                                     <ComboBoxItem Content="Gemini (needs key)" Tag="Gemini" />
-                                    <ComboBoxItem Content="Windows basic offline (least accurate)" Tag="Windows" />
+                                    <ComboBoxItem Content="Windows offline (basic, no key)" Tag="Windows" />
                                 </ComboBox>
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
@@ -222,7 +222,7 @@
                     <CheckBox x:Name="SpeakBox" Content="Speak results aloud" Margin="0,4" />
                     <CheckBox x:Name="CuesBox" Content="Play short sound cues" Margin="0,4" />
                     <CheckBox x:Name="OverlayBox" Content="Show the floating assistant" Margin="0,4" />
-                    <TextBlock Text="Recognition language (try en-IN for South Asian English)" FontWeight="SemiBold" Margin="0,14,0,4" />
+                    <TextBlock Text="Offline recognition language (Windows speech packs installed on this PC)" FontWeight="SemiBold" Margin="0,14,0,4" />
                     <ComboBox x:Name="CultureBox" Width="260" HorizontalAlignment="Left" />
                     <TextBlock Text="Offline Windows voice (used when the natural voice isn't available)" FontWeight="SemiBold" Margin="0,14,0,4" />
                     <ComboBox x:Name="VoiceBox" Width="360" HorizontalAlignment="Left" />

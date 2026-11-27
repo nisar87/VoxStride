@@ -27,7 +27,7 @@ Measured on the CI runner, not a target PC: host startup 288 ms (headless), work
 |---|---|---|
 | P0 research/spikes | **Partial** | Research, ADRs, threat model and docs done. Competitor hands-on trials and the UFO VM benchmark are pending (they need a disposable Windows VM). |
 | P1 safe vertical slice | **Verified** | Contracts, broker, journal, router, three adapters (fixture-verified), disk and app tools, CI. |
-| P2 voice engine | **Implemented; logic verified** | 240-trial scripted gate: zero premature commits. Physical mic, wake latency and false-accept rate are unmeasured. |
+| P2 voice engine | **Implemented; logic verified** | 240-trial scripted gate: zero premature commits. 0.3.0 rebuilt the audio path on one shared microphone (ADR-0009). The offline engine is verified end to end on Windows CI with synthesized speech fed as live audio. The owner's physical microphone, wake latency and false-accept rate are unmeasured. |
 | P3 files/system | **Verified** | Organizer, exclusions, collisions, path escapes, TOCTOU, undo conflicts, crash reporting, temp cleanup with measured bytes. |
 | P4 desktop apps | **Partial** | Notepad and Notepad++ adapter (exact-HWND write and read-back; Notepad verified on CI). Not started: UIA worker process, vision fallback, multi-monitor/DPI GUI tests. |
 | P5 browser | **Partial** | P5a Playwright and Edge (YouTube visible-row selection, ChatGPT draft-only) implemented, with layout logic unit-verified. Live sites unverified. P5b existing-browser extension not started. |
@@ -51,7 +51,7 @@ Measured on the CI runner, not a target PC: host startup 288 ms (headless), work
 
 ## Known limitations
 - The wake phrase uses Windows grammar recognition. Accuracy and false-accept rate are unmeasured, and the hotkey always works as an alternative.
-- Dictation accuracy depends on the installed Windows speech recognizer. There is no cloud STT option yet.
+- Without an OpenAI or Gemini key, dictation uses the offline Windows recognizer, which is weak with non-native accents. Cloud STT (OpenAI/Gemini) is available with consent and a key. Windows online dictation can't be used by an unpackaged app (ADR-0009).
 - Push-to-talk is a press-to-start / press-to-finish toggle, not hold-to-talk.
 - If Windows 11 Notepad restores a non-empty tab, VoxStride refuses to write rather than overwrite.
 - The browser only works in VoxStride's own Edge window, not in the user's existing browser (P5b).

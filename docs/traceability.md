@@ -19,6 +19,7 @@ Status legend: **Verified** (automated evidence in CI), **Implemented** (code co
 | R-020 | Explicit commit; pauses never commit (§3, §14) | `ConversationCoordinator`, `CommandBuffer`, `ControlPhraseDetector` | `V01–V05`, 240-trial gate | Verified (logic) | Real-mic trials pending (M-V01) |
 | R-021 | 30 s reminder / 120 s discard, never auto-execute (§14.2) | Coordinator ticks | `ReminderAt30sAndDiscardAt120s…` | Verified | — |
 | R-022 | Local STT/TTS/earcons; Claude-only voice (§5, §14.1) | `VoxStride.Speech` | `SpeechEnvironmentReports…`, `EarconsAreValidWav` | Implemented | Accuracy & latency on real mic unmeasured |
+| R-022a | Live audio reaches the recognizer; microphone always released; one shared device (ADR-0009) | `AudioHub`, `PcmPipeStream`, `WindowsSpeechRecognizer`, `MicWatchdog` | `PcmPipeStreamTests`, `AudioHubTests`, `SpeechPipelineTests` (Windows E2E) | Implemented | Owner's physical microphone unverified |
 | R-023 | Wake phrase, no model training (§14.1) | `WindowsWakeWordDetector` (grammar) | — | Implemented | False-accept rate unmeasured (V06) |
 | R-024 | Lock/sleep/mute handling (§14.2) | App `SessionSwitch`/`PowerModeChanged`, coordinator | `V05_LockAndMuteDiscardDraft` | Verified (logic) | — |
 | R-025 | Push-to-talk | Hotkey toggle (press to talk, press to proceed) | — | Partial | Hold-to-talk not implemented |
