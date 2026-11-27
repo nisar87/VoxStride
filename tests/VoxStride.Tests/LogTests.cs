@@ -58,8 +58,9 @@ public sealed class LogTests
     public void MessagesAndExceptionsAreRedactedBeforeReachingTheSink()
     {
         using var scope = CapturingSink.Install(out var sink);
-        Log.Error("ai", "call failed with key " + "sk-" + "ant-api03-SECRETSECRET", new InvalidOperationException("Bearer abcdefghijklmnop"));
-        var e = Assert.Single(sink.Entries);
+        Log.Error("redaction-test", "call failed with key " + "sk-" + "ant-api03-SECRETSECRET", new InvalidOperationException("Bearer abcdefghijklmnop"));
+        // Other test classes run in parallel and may log too; pick out this test's line.
+        var e = Assert.Single(sink.Entries, x => x.Area == "redaction-test");
         Assert.Equal(LogLevel.Error, e.Level);
         Assert.DoesNotContain("SECRETSECRET", e.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("abcdefghijklmnop", e.Exception!, StringComparison.Ordinal);
@@ -99,8 +100,8 @@ public sealed class LogTests
     public void TimingLogsElapsed()
     {
         using var scope = CapturingSink.Install(out var sink);
-        using (Log.Time("run", "route decision", LogLevel.Info)) { }
-        Assert.True(sink.Has("run", "route decision took"));
+        using (Log.Time("timing-test", "route decision", LogLevel.Info)) { }
+        Assert.True(sink.Has("timing-test", "route decision took"));
     }
 
     private sealed class ThrowingSink : ILogSink { public void Write(in LogEntry entry) => throw new IOException("disk full"); }
@@ -157,7 +158,7 @@ public sealed class DiagnosticsTrailTests
         using var scope = CapturingSink.Install(out var log);
         using var http = new HttpClient(new VoxStride.Providers.LoggingHandler(new StubHandler()));
         using var resp = await http.GetAsync(new Uri("https://generativelanguage.googleapis.com/v1beta/models/x:stream?key=" + "AI" + "zaSyVerySecretValue123456&alt=sse"));
-        var line = Assert.Single(log.Entries, e => e.Area == "http");
+        var line = Assert.Single(log.Entries, e => e.Area == "http" && e.Message.Contains("x:stream", StringComparison.Ordinal));
         Assert.Contains("generativelanguage.googleapis.com/v1beta/models/x:stream -> 200", line.Message, StringComparison.Ordinal);
         Assert.Contains("requestId=req-42", line.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("VerySecret", line.Message, StringComparison.Ordinal);
