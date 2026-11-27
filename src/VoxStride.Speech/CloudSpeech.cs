@@ -167,7 +167,7 @@ public sealed class NaturalSpeechSynthesizer(WindowsSpeechSynthesizer local, ICl
         if (Cloud is { } c)
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-            timeout.CancelAfter(TimeSpan.FromSeconds(6));
+            timeout.CancelAfter(TimeSpan.FromSeconds(12)); // Gemini TTS can take several seconds for a long reply
             try { wav = await c.SynthesizeAsync(text, timeout.Token).ConfigureAwait(false); } catch (OperationCanceledException) { }
         }
         if (cts.IsCancellationRequested) { Log.Debug("tts", "speech interrupted before playback"); return; }
@@ -182,7 +182,7 @@ public sealed class NaturalSpeechSynthesizer(WindowsSpeechSynthesizer local, ICl
         Marshal.Copy(wav, 0, p, wav.Length);
         lock (_gate) { FreePlaying(); _playing = p; }
         PlaySound(p, 0, SND_ASYNC | SND_MEMORY | SND_NODEFAULT);
-        var seconds = Math.Max(1, (wav.Length - 44) / (24000.0 * 2)); // gpt-4o-mini-tts WAV is 24 kHz mono 16-bit
+        var seconds = Math.Max(1, (wav.Length - 44) / (24000.0 * 2)); // OpenAI and Gemini voices are both 24 kHz mono 16-bit
         try { await Task.Delay(TimeSpan.FromSeconds(seconds + 0.5), cts.Token).ConfigureAwait(false); } catch (OperationCanceledException) { }
         lock (_gate) { if (_playing == p) { PlaySound(0, 0, 0); FreePlaying(); } }
     }

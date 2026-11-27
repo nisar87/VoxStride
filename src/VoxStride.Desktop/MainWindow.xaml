@@ -217,7 +217,7 @@
                     <Border CornerRadius="10" Padding="14" Background="#10808080" Margin="0,0,0,14">
                         <StackPanel>
                             <TextBlock Text="How VoxStride sounds" FontWeight="SemiBold" FontSize="15" />
-                            <CheckBox x:Name="NaturalVoiceBox" Content="Natural human-like voice (OpenAI, needs an OpenAI key)" Margin="0,6,0,4" />
+                            <CheckBox x:Name="NaturalVoiceBox" Content="Natural human-like voice (needs a Gemini or OpenAI key)" Margin="0,6,0,4" />
                             <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                                 <TextBlock Text="Voice" VerticalAlignment="Center" Width="90" />
                                 <ComboBox x:Name="CloudVoiceBox" Width="260" />

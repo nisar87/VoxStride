@@ -222,3 +222,64 @@ public sealed class CloudSpeechContractTests
         Assert.Contains("warm", body["instructions"]!.GetValue<string>());
     }
 }
+
+public sealed class GeminiVoiceTests
+{
+    private sealed class Handler(Func<HttpRequestMessage, string, HttpResponseMessage> respond) : HttpMessageHandler
+    {
+        public List<(string Url, string Body)> Requests { get; } = [];
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);
+            Requests.Add((request.RequestUri!.ToString(), body));
+            return respond(request, body);
+        }
+    }
+
+    private static HttpResponseMessage Audio(byte[] pcm) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent("{\"candidates\":[{\"content\":{\"parts\":[{\"inlineData\":{\"mimeType\":\"audio/L16;codec=pcm;rate=24000\",\"data\":\"" + Convert.ToBase64String(pcm) + "\"}}]}}]}"),
+    };
+
+    [Fact]
+    public async Task RequestsAudioWithTheChosenVoiceAndReturnsPlayableWav()
+    {
+        var h = new Handler((_, _) => Audio(new byte[48000]));
+        var v = new GeminiVoice("test-key", "Achird", handler: h);
+        var wav = await v.SynthesizeAsync("I'm doing great, thanks for asking!", CancellationToken.None);
+        Assert.NotNull(wav);
+        Assert.Equal(44 + 48000, wav!.Length);
+        Assert.Equal("RIFF", Encoding.ASCII.GetString(wav, 0, 4));
+        Assert.Equal(24000, BitConverter.ToInt32(wav, 24));
+        var (url, body) = h.Requests.Single();
+        Assert.Contains("gemini-3.1-flash-tts-preview:generateContent", url);
+        var json = JsonNode.Parse(body)!;
+        Assert.Equal("AUDIO", json["generationConfig"]!["responseModalities"]![0]!.GetValue<string>());
+        Assert.Equal("Achird", json["generationConfig"]!["speechConfig"]!["voiceConfig"]!["prebuiltVoiceConfig"]!["voiceName"]!.GetValue<string>());
+        Assert.Contains("thanks for asking", json["contents"]![0]!["parts"]![0]!["text"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task UnknownModelFallsBackToThePreviousGeneration()
+    {
+        var h = new Handler((r, _) => r.RequestUri!.ToString().Contains("3.1") ? new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("{}") } : Audio(new byte[100]));
+        var wav = await new GeminiVoice("k", handler: h).SynthesizeAsync("hello", CancellationToken.None);
+        Assert.NotNull(wav);
+        Assert.Equal(2, h.Requests.Count);
+        Assert.Contains("gemini-2.5-flash-preview-tts", h.Requests[1].Url);
+    }
+
+    [Fact]
+    public async Task FailureReturnsNullSoTheWindowsVoiceIsUsed()
+    {
+        var h = new Handler((_, _) => new HttpResponseMessage(HttpStatusCode.TooManyRequests) { Content = new StringContent("{}") });
+        Assert.Null(await new GeminiVoice("k", handler: h).SynthesizeAsync("hello", CancellationToken.None));
+    }
+
+    [Fact]
+    public void OpenAIVoiceNamesMapToADefaultGeminiVoice()
+    {
+        Assert.Equal(GeminiVoice.DefaultVoice, GeminiVoice.NormalizeVoice("marin"));
+        Assert.Equal("Kore", GeminiVoice.NormalizeVoice("kore"));
+    }
+}

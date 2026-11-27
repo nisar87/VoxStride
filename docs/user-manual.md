@@ -17,7 +17,7 @@ Open **Voice**, tick **Use cloud speech recognition**, choose **Automatic** (or 
 To finish you can also say **"VoxStride, chalo"** or **"VoxStride, karo"**. Small accent differences in "VoxStride, execute" are understood.
 
 ## 2b. A more natural voice
-Under **Voice → How VoxStride sounds**, tick **Natural human-like voice** (needs an OpenAI key) and pick a voice. VoxStride replies conversationally in the language you speak. With an AI key you can also just chat or ask questions.
+Under **Voice → How VoxStride sounds**, tick **Natural human-like voice** and pick a voice. This needs a Gemini key (voices such as Sulafat, Achird or Aoede) or an OpenAI key. Without either, VoxStride uses the built-in Windows voice. Greetings, small talk and "what do you think about…" questions get a real, human-style answer. For back-and-forth talking without saying "VoxStride, execute" each time, turn on **Natural mode** (see 3d). VoxStride replies conversationally in the language you speak. With an AI key you can also just chat or ask questions.
 
 ## 3. What it can do
 

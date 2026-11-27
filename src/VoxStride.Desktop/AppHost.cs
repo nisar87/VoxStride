@@ -329,8 +329,17 @@ public sealed class AppHost : IAsyncDisposable
     private ICloudVoice? CreateCloudVoice()
     {
         if (!Settings.NaturalVoice) return null;
-        var key = Secrets.Load(ProviderSelector.SecretName(ProviderKind.OpenAI));
-        return string.IsNullOrEmpty(key) ? null : new OpenAIVoice(key, Settings.CloudVoiceName);
+        var openAi = Secrets.Load(ProviderSelector.SecretName(ProviderKind.OpenAI));
+        var gemini = Secrets.Load(ProviderSelector.SecretName(ProviderKind.Gemini));
+        var useGemini = !string.IsNullOrEmpty(gemini) && (string.IsNullOrEmpty(openAi) || !OpenAIVoice.Voices.Contains(Settings.CloudVoiceName));
+        if (useGemini)
+        {
+            Log.Info("tts", $"natural voice: Gemini \"{GeminiVoice.NormalizeVoice(Settings.CloudVoiceName)}\"");
+            return new GeminiVoice(gemini!, Settings.CloudVoiceName);
+        }
+        if (!string.IsNullOrEmpty(openAi)) { Log.Info("tts", $"natural voice: OpenAI \"{Settings.CloudVoiceName}\""); return new OpenAIVoice(openAi, Settings.CloudVoiceName); }
+        Log.Info("tts", "natural voice needs an OpenAI or Gemini key; using the Windows voice");
+        return null;
     }
 
     public void RefreshVoice() { if (Speech is not null) Speech.Cloud = CreateCloudVoice(); }

@@ -215,3 +215,16 @@ public sealed class ProviderImageTests
         Assert.Equal("image/png", parts[1]!["inline_data"]!["mime_type"]!.GetValue<string>());
     }
 }
+
+public sealed class ConversationalPromptTests
+{
+    [Fact]
+    public void PromptAsksToAnswerGreetingsAndTalkThingsThrough()
+    {
+        var p = VoxStride.Core.Agent.RunCoordinator.SystemInstruction;
+        Assert.Contains("Respond to EVERYTHING the user said", p);
+        Assert.Contains("how are you", p);
+        Assert.Contains("thoughtful friend", p);
+        Assert.Contains("untrusted data", p); // safety rules still present
+    }
+}

@@ -163,3 +163,93 @@ public sealed class OpenAIVoice(string apiKey, string voice = "marin", string mo
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { Log.Warn("tts", "cloud voice network problem (falling back to the Windows voice)", ex); return null; }
     }
 }
+
+/// <summary>
+/// Gemini text-to-speech (generateContent with AUDIO output) natural voice, so a Gemini key alone gives a human-like
+/// voice. Gemini returns raw 16-bit mono PCM at 24 kHz, which is wrapped in a WAV header for playback. If the newest
+/// TTS model isn't available to the key, the previous generation is tried once.
+/// </summary>
+public sealed class GeminiVoice(string apiKey, string voice = GeminiVoice.DefaultVoice, Uri? baseUri = null, HttpMessageHandler? handler = null, IReadOnlyList<string>? models = null) : ICloudVoice
+{
+    public const string DefaultVoice = "Sulafat";
+    /// <summary>Prebuilt Gemini voices (name — character).</summary>
+    public static readonly string[] Voices = ["Sulafat", "Achird", "Aoede", "Kore", "Leda", "Puck", "Zephyr", "Charon", "Fenrir", "Orus", "Callirrhoe", "Despina", "Gacrux", "Vindemiatrix", "Sadachbia", "Umbriel"];
+    private static readonly string[] DefaultModels = ["gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"];
+    private readonly HttpClient _http = SpeechHttp.Client(handler);
+    private readonly IReadOnlyList<string> _models = models ?? DefaultModels;
+    private int _modelIndex;
+
+    public static string NormalizeVoice(string? name) =>
+        Voices.FirstOrDefault(v => string.Equals(v, name, StringComparison.OrdinalIgnoreCase)) ?? DefaultVoice;
+
+    public async Task<byte[]?> SynthesizeAsync(string text, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        while (_modelIndex < _models.Count)
+        {
+            var model = _models[_modelIndex];
+            var (audio, retryNextModel) = await TryModelAsync(model, text.Length > 3000 ? text[..3000] : text, ct).ConfigureAwait(false);
+            if (audio is not null || !retryNextModel) return audio;
+            Log.Warn("tts", $"Gemini voice model {model} unavailable; trying the next one");
+            Interlocked.Increment(ref _modelIndex);
+        }
+        return null;
+    }
+
+    private async Task<(byte[]? Audio, bool TryNext)> TryModelAsync(string model, string text, CancellationToken ct)
+    {
+        var body = new JsonObject
+        {
+            ["contents"] = new JsonArray(new JsonObject
+            {
+                ["parts"] = new JsonArray(new JsonObject
+                {
+                    ["text"] = "Say this like a warm, friendly person in a relaxed conversation, at a natural pace. If parts are in Urdu or Roman Urdu, pronounce them naturally in Urdu:\n" + text,
+                }),
+            }),
+            ["generationConfig"] = new JsonObject
+            {
+                ["responseModalities"] = new JsonArray("AUDIO"),
+                ["speechConfig"] = new JsonObject
+                {
+                    ["voiceConfig"] = new JsonObject { ["prebuiltVoiceConfig"] = new JsonObject { ["voiceName"] = NormalizeVoice(voice) } },
+                },
+            },
+        };
+        var uri = new Uri(baseUri ?? new Uri("https://generativelanguage.googleapis.com/"), "v1beta/models/" + Uri.EscapeDataString(model) + ":generateContent");
+        using var req = new HttpRequestMessage(HttpMethod.Post, uri) { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
+        req.Headers.Add("x-goog-api-key", apiKey);
+        try
+        {
+            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+            var json = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                Log.Warn("tts", $"Gemini voice {model} HTTP {(int)resp.StatusCode} body={(json.Length > 600 ? json[..600] : json)} (falling back to the Windows voice)");
+                return (null, resp.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.BadRequest);
+            }
+            var data = JsonNode.Parse(json)?["candidates"]?[0]?["content"]?["parts"]?.AsArray()
+                .Select(p => p?["inlineData"]?["data"]?.GetValue<string>()).FirstOrDefault(d => !string.IsNullOrEmpty(d));
+            if (data is null) { Log.Warn("tts", $"Gemini voice {model} returned no audio"); return (null, false); }
+            var pcm = Convert.FromBase64String(data);
+            var wav = PcmToWav(pcm, 24000);
+            Log.Debug("tts", $"Gemini voice {NormalizeVoice(voice)} ({model}) synthesized {SpeechHttp.Seconds(wav, 24000):0.0}s for {text.Length} chars");
+            return (wav, false);
+        }
+        catch (TaskCanceledException) when (ct.IsCancellationRequested) { Log.Debug("tts", "Gemini voice cancelled (interrupted or slow)"); return (null, false); }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or FormatException or System.Text.Json.JsonException) { Log.Warn("tts", "Gemini voice failed (falling back to the Windows voice)", ex); return (null, false); }
+    }
+
+    /// <summary>Wraps 16-bit mono PCM in a RIFF/WAVE header.</summary>
+    public static byte[] PcmToWav(byte[] pcm, int sampleRate)
+    {
+        using var ms = new MemoryStream(44 + pcm.Length);
+        using var w = new BinaryWriter(ms);
+        w.Write("RIFF"u8); w.Write(36 + pcm.Length); w.Write("WAVE"u8);
+        w.Write("fmt "u8); w.Write(16); w.Write((short)1); w.Write((short)1); w.Write(sampleRate);
+        w.Write(sampleRate * 2); w.Write((short)2); w.Write((short)16);
+        w.Write("data"u8); w.Write(pcm.Length); w.Write(pcm);
+        w.Flush();
+        return ms.ToArray();
+    }
+}
