@@ -93,6 +93,18 @@ public sealed class PcmPipeStreamTests
     }
 
     [Fact]
+    public void ReportsUnknownLengthAsSapiExpects()
+    {
+        var pipe = new PcmPipeStream(4096);
+        Assert.Equal(-1, pipe.Length); // System.Speech: -1 = no known end; throwing breaks SetInputToAudioStream
+        Assert.False(pipe.CanSeek);
+        pipe.Append(Bytes(100));
+        pipe.Complete();
+        _ = pipe.Read(new byte[100], 0, 100);
+        Assert.Equal(100, pipe.Seek(0, SeekOrigin.Current));
+    }
+
+    [Fact]
     public void AppendAfterCompleteIsIgnored()
     {
         var pipe = new PcmPipeStream(4096);

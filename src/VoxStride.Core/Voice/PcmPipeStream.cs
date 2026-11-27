@@ -96,7 +96,11 @@ public sealed class PcmPipeStream : Stream
     public override bool CanRead => true;
     public override bool CanSeek => false;
     public override bool CanWrite => false;
-    public override long Length => throw new NotSupportedException();
+    /// <summary>
+    /// Always -1: System.Speech caches <c>Length</c> when the stream is attached and treats -1 as "no known end";
+    /// any other value would make it clamp reads at that length. Throwing makes <c>SetInputToAudioStream</c> fail.
+    /// </summary>
+    public override long Length => -1;
     public override long Position { get { lock (_gate) return _readTotal; } set { } }
     public override void Flush() { }
     /// <summary>Non-seekable; returns the read position so position queries from native callers don't fail.</summary>
