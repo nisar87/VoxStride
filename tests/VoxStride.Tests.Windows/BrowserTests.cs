@@ -237,3 +237,36 @@ public sealed class ExtensionEndToEndTests(ITestOutputHelper output)
         }
     }
 }
+
+/// <summary>P5 gate: ≥100 attempts of the supported workflow (observe → fill search → submit → verify → back), ≥95% verified.</summary>
+[Collection("Desktop")]
+public sealed class BrowserGateTests(ITestOutputHelper output) : IAsyncLifetime
+{
+    private readonly FixtureSite _site = new();
+    private readonly PlaywrightBrowserController _browser = new(Path.Combine(Path.GetTempPath(), "voxstride-gate-profile-" + Guid.NewGuid().ToString("N")[..8]));
+    public Task InitializeAsync() => Task.CompletedTask;
+    public async Task DisposeAsync() { await _browser.DisposeAsync(); _site.Dispose(); }
+
+    [Fact]
+    public async Task Gate_100SearchWorkflows_AtLeast95PercentVerified()
+    {
+        await _browser.OpenForTestAsync(new Uri(_site.Base + "form"), CancellationToken.None);
+        var ok = 0;
+        const int n = 100;
+        for (var i = 0; i < n; i++)
+        {
+            try
+            {
+                var o = await _browser.ObserveAsync(null, 100, CancellationToken.None);
+                var search = o!.Elements.First(e => e.IsSearch && e.Role == "searchbox");
+                var q = "item " + i;
+                var r = await _browser.FillAsync(o, search.Id, q, pressEnter: true, CancellationToken.None);
+                if (r.Ok && r.Title == "Results for " + q) ok++;
+                await _browser.BackAsync(null, CancellationToken.None);
+            }
+            catch (Exception ex) { output.WriteLine($"attempt {i}: {ex.GetType().Name}: {ex.Message}"); }
+        }
+        output.WriteLine($"E2E-WEB-GATE: search workflow verified {ok}/{n}");
+        Assert.True(ok >= 95, $"{ok}/{n}");
+    }
+}
