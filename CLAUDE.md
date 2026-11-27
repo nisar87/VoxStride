@@ -20,4 +20,8 @@ Full contract: [docs/VoxStride_Master_Implementation_Plan.md](docs/VoxStride_Mas
 `src/VoxStride.Contracts` (immutable contracts) · `src/VoxStride.Core` (policy, broker, journal, router, voice coordinator, run coordinator, tools) · `src/VoxStride.Providers` (Claude/OpenAI/Gemini over HTTPS+SSE) · `src/VoxStride.Windows` (speech, known folders, app catalog, editor, secrets) · `src/VoxStride.Browser` (Playwright/Edge) · `src/VoxStride.Persistence` (SQLite) · `src/VoxStride.Desktop` (WPF app) · `tests/` · `installer/` · `docs/`.
 
 ## Workflow
-Small, focused commits on `main` (owner-authorized). Never force-push, publish releases, or incur costs without explicit permission.
+Small, focused commits on `main` (owner-authorized). Never force-push or incur costs without explicit permission.
+
+**Releases:** the owner has given standing permission (2026-11-27) to publish a release after every verified fix, so users get it from the in-app update button. Process: bump `<Version>` in `Directory.Build.props` (must be higher than the last release), add `docs/releases/v<version>.md`, push to `main`, confirm CI is green, then trigger the Release workflow with `gh api -X POST repos/nisar87/VoxStride/actions/workflows/release.yml/dispatches -f ref=main -f 'inputs[version]=<version>'` (tag pushes are blocked by the session proxy). Verify the release has `VoxStride-Setup-<version>-x64.exe` and `SHA256SUMS.txt`.
+
+**User's machine:** never change Windows or app settings on the owner's computer; suggest changes for them to make.
