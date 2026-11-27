@@ -192,13 +192,11 @@ public partial class MainWindow : Window
         foreach (ComboBoxItem item in EngineBox.Items) if ((string)item.Tag == s.SpeechEngine.ToString()) EngineBox.SelectedItem = item;
         SensitivitySlider.Value = s.MicSensitivity;
         NaturalVoiceBox.IsChecked = s.NaturalVoice;
-        var hasGemini = _app.Host?.Secrets.Load(ProviderSelector.SecretName(ProviderKind.Gemini)) is { Length: > 0 };
-        var hasOpenAi = _app.Host?.Secrets.Load(ProviderSelector.SecretName(ProviderKind.OpenAI)) is { Length: > 0 };
-        var voices = (hasGemini ? GeminiVoice.Voices : Array.Empty<string>()).Concat(hasOpenAi || !hasGemini ? OpenAIVoice.Voices : Array.Empty<string>()).ToList();
-        CloudVoiceBox.ItemsSource = voices;
-        CloudVoiceBox.SelectedItem = voices.Contains(s.CloudVoiceName) ? s.CloudVoiceName : voices[0];
         var hasOpenAi = _app.Host!.Secrets.Load(ProviderSelector.SecretName(ProviderKind.OpenAI)) is { Length: > 0 };
         var hasGemini = _app.Host.Secrets.Load(ProviderSelector.SecretName(ProviderKind.Gemini)) is { Length: > 0 };
+        var cloudVoices = (hasGemini ? GeminiVoice.Voices : Array.Empty<string>()).Concat(hasOpenAi || !hasGemini ? OpenAIVoice.Voices : Array.Empty<string>()).ToList();
+        CloudVoiceBox.ItemsSource = cloudVoices;
+        CloudVoiceBox.SelectedItem = cloudVoices.Contains(s.CloudVoiceName) ? s.CloudVoiceName : cloudVoices[0];
         EngineInfo.Text = $"Currently using: {_app.Host.SpeechEngineLabel}. " + (_app.Host.UsingBasicEngine
             ? (!hasOpenAi && !hasGemini
                 ? "The offline Windows engine works without a key but is weak with accents. For accurate recognition of your accent and mixed Urdu/English, add an OpenAI or Gemini key under Reasoning providers and tick cloud speech above. (A Claude key can't transcribe audio.)"
