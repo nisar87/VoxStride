@@ -55,6 +55,10 @@ public sealed class AppSettings
     public int MaxSteps { get; set; } = 30;
     public int MaxRunSeconds { get; set; } = 180;
     public bool ShowOverlay { get; set; } = true;
+    /// <summary>Extra folders (absolute paths) the file tools may use, in addition to the default known folders.</summary>
+    public List<string> AllowedFolders { get; set; } = [];
+    /// <summary>Default known folders the user switched off (e.g. "Pictures").</summary>
+    public List<string> DisabledKnownFolders { get; set; } = [];
     /// <summary>Include what the user says and VoxStride's replies in the local diagnostics log (never audio, never keys).</summary>
     public bool LogConversationText { get; set; } = true;
 

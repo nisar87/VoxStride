@@ -148,7 +148,8 @@ public sealed class UndoOrganizationTool(FileToolServices s) : ToolBase
         var id = ctx.Items.TryGetValue("manifestId", out var v) ? (string)v : Str(args, "manifestId");
         var moves = await ctx.Journal.GetMovesAsync(id, ct);
         if (moves.Count == 0) return ToolResult.Fail("nothing_to_undo", "Nothing to undo.");
-        var root = Path.GetDirectoryName(moves[0].SourcePath)!;
+        // The allowed area for undo is exactly where this run's files came from and went to (moves can cross folders).
+        var root = ManifestMoveToolBase.CommonAncestor(moves.SelectMany(m => new[] { m.SourcePath, m.DestinationPath }));
         var r = await s.Executor.UndoAsync(id, s.PolicyFor(root), ctx, ct);
         var state = new JsonObject { ["restored"] = r.Moved, ["conflicts"] = r.Skipped, ["failed"] = r.Failed };
         var outcome = r.Skipped + r.Failed == 0 ? ToolOutcome.Success : r.Moved > 0 ? ToolOutcome.Partial : ToolOutcome.Failure;

@@ -100,6 +100,8 @@ public sealed class AppHost : IAsyncDisposable
     public WindowsWakeWordDetector? Wake { get; private set; }
     public PlaywrightBrowserController Browser { get; }
     public FileToolServices FileServices { get; }
+    /// <summary>Folders the general file tools may use (Settings › Permissions).</summary>
+    public FileScope Scope { get; }
     public IUserApproval Approvals { get; }
 
     public AppHost(AppSettings settings, IUserApproval approvals, bool enableSpeech)
@@ -114,7 +116,11 @@ public sealed class AppHost : IAsyncDisposable
         Browser = new PlaywrightBrowserController();
         var controller = new WindowsAppController();
 
+        Scope = new FileScope(new WindowsKnownFolders(), () => settings.AllowedFolders,
+            () => settings.DisabledKnownFolders.Select(n => Enum.TryParse<KnownFolder>(n, true, out var k) ? (KnownFolder?)k : null).OfType<KnownFolder>().ToList());
         Registry
+            .Add(new ListFilesTool(Scope)).Add(new SearchFilesTool(Scope)).Add(new CreateFolderTool(Scope, Store))
+            .Add(new MoveFilesTool(Scope, FileServices)).Add(new RenameFileTool(Scope, FileServices)).Add(new CopyFilesTool(Scope)).Add(new RecycleFilesTool(Scope, new WindowsFileRemover()))
             .Add(new GetFreeSpaceTool(drives)).Add(new ListDrivesTool(drives))
             .Add(new PreviewOrganizationTool(FileServices)).Add(new ApplyOrganizationTool(FileServices)).Add(new UndoOrganizationTool(FileServices))
             .Add(new PreviewTempCleanupTool(FileServices)).Add(new ApplyTempCleanupTool(FileServices))
