@@ -73,7 +73,7 @@ public sealed class GeminiProvider(ProviderSettings settings, HttpMessageHandler
                 ["contents"] = _contents.DeepClone(),
                 ["tools"] = _tools.DeepClone(),
                 ["toolConfig"] = new JsonObject { ["functionCallingConfig"] = new JsonObject { ["mode"] = "AUTO" } },
-                ["generationConfig"] = new JsonObject { ["maxOutputTokens"] = p.Settings.MaxOutputTokens },
+                ["generationConfig"] = GeminiThinking.Apply(new JsonObject { ["maxOutputTokens"] = p.Settings.MaxOutputTokens }, p.Model, fast: false),
             };
             var uri = new Uri(p.BaseUri(DefaultBase), "v1beta/models/" + Uri.EscapeDataString(p.Model) + ":streamGenerateContent?alt=sse");
             using var req = new HttpRequestMessage(HttpMethod.Post, uri) { Content = Json(body) };
@@ -171,5 +171,27 @@ public sealed class GeminiProvider(ProviderSettings settings, HttpMessageHandler
             foreach (var c in pendingCalls) yield return c;
             yield return new CompletedEvent(finish);
         }
+    }
+}
+
+/// <summary>
+/// Gemini 3 models think at a high level by default, which made a simple voice request take ~14 s before the first
+/// token. A voice assistant needs fast turns, so VoxStride asks for little thinking: "low" for the agent (supported
+/// by Gemini 3 Flash and Pro) and "minimal" for transcription on Flash models. Gemini 2.5 Flash gets a zero
+/// thinking budget. Other models are left as they are.
+/// </summary>
+public static class GeminiThinking
+{
+    public static JsonObject Apply(JsonObject generationConfig, string model, bool fast)
+    {
+        var m = model.ToLowerInvariant();
+        if (m.StartsWith("gemini-3", StringComparison.Ordinal) || m.StartsWith("gemini-4", StringComparison.Ordinal))
+        {
+            var level = fast && (m.Contains("flash", StringComparison.Ordinal)) ? "minimal" : "low";
+            generationConfig["thinkingConfig"] = new JsonObject { ["thinkingLevel"] = level };
+        }
+        else if (m.StartsWith("gemini-2.5-flash", StringComparison.Ordinal))
+            generationConfig["thinkingConfig"] = new JsonObject { ["thinkingBudget"] = 0 };
+        return generationConfig;
     }
 }

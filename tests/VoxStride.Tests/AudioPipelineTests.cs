@@ -426,3 +426,31 @@ public sealed class AutoGainTests
         Assert.Equal(0, discarded);
     }
 }
+
+public sealed class SpeechChunkTests
+{
+    [Fact]
+    public void FirstSentenceIsSpokenFirst()
+    {
+        var (first, rest) = SpeechChunks.Split("Hi! I'm doing great, and yes, I'm listening loud and clear. I've searched for the cricket match between Pakistan and Sri Lanka, and the results are up on your screen now.");
+        Assert.Equal("Hi! I'm doing great, and yes, I'm listening loud and clear.", first);
+        Assert.StartsWith("I've searched", rest);
+    }
+
+    [Fact]
+    public void ShortRepliesStayWhole()
+    {
+        var (first, rest) = SpeechChunks.Split("Done. Notepad is open.");
+        Assert.Equal("Done. Notepad is open.", first);
+        Assert.Null(rest);
+    }
+
+    [Fact]
+    public void LongSentenceWithoutStopSplitsAtAComma()
+    {
+        var text = "You have about nine gigabytes of free space left on your C drive out of two hundred and thirty nine, which is quite low, so I would suggest cleaning up temporary files soon";
+        var (first, rest) = SpeechChunks.Split(text);
+        Assert.EndsWith(",", first);
+        Assert.Equal(text, first + " " + rest);
+    }
+}

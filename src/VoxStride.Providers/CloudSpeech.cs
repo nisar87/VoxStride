@@ -95,7 +95,7 @@ public sealed class GeminiTranscriber(string apiKey, string model, Uri? baseUri 
                     new JsonObject { ["text"] = instruction },
                     new JsonObject { ["inline_data"] = new JsonObject { ["mime_type"] = "audio/wav", ["data"] = Convert.ToBase64String(wav) } }),
             }),
-            ["generationConfig"] = new JsonObject { ["temperature"] = 0, ["maxOutputTokens"] = 512 },
+            ["generationConfig"] = GeminiThinking.Apply(new JsonObject { ["temperature"] = 0, ["maxOutputTokens"] = 512 }, model, fast: true),
         };
         var uri = new Uri(baseUri ?? new Uri(GeminiProvider.DefaultBase), "v1beta/models/" + Uri.EscapeDataString(model) + ":generateContent");
         using var req = new HttpRequestMessage(HttpMethod.Post, uri) { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };

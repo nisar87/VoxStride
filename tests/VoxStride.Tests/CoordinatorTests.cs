@@ -93,6 +93,56 @@ public sealed class CoordinatorTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task ShortYesAfterReadyToExecuteCommitsWithoutTheAnswerWord()
+    {
+        // Owner's log: "... search for cricket. Proceed" -> "Ready to execute?" -> nothing happened until the button.
+        await Wake();
+        _rec.Say("a", "open the Chrome browser and search for cricket", 0);
+        _rec.Say("b", "Proceed", 5000);
+        await Settle();
+        Assert.Empty(_sink.Commands);
+        Assert.True(_c.AwaitingExecuteConfirmation);
+        _rec.Say("n", "", 7000);                      // a cough between the question and the answer
+        await Settle();
+        Assert.True(_c.AwaitingExecuteConfirmation);
+        _rec.Say("c", "Yes, proceed.", 9000);
+        await Settle();
+        var cmd = Assert.Single(_sink.Commands);
+        Assert.DoesNotContain("Yes", cmd.FinalizedTranscript);
+        Assert.StartsWith("open the Chrome browser and search for cricket", cmd.FinalizedTranscript);
+    }
+
+    [Fact]
+    public async Task RealContentAfterTheQuestionMeansKeepTalking()
+    {
+        await Wake();
+        _rec.Say("a", "write a note", 0);
+        _rec.Say("b", "execute", 3000);
+        await Settle();
+        Assert.True(_c.AwaitingExecuteConfirmation);
+        _rec.Say("c", "about the meeting tomorrow", 5000);
+        await Settle();
+        Assert.False(_c.AwaitingExecuteConfirmation);
+        Assert.Equal(AgentState.Listening, _c.State);
+        _rec.Say("d", "yes", 8000);                   // without a pending question, "yes" is just content
+        await Settle();
+        Assert.Empty(_sink.Commands);
+    }
+
+    [Theory]
+    [InlineData("yes", true)]
+    [InlineData("Yes, proceed.", true)]
+    [InlineData("VoxStride proceed", true)]
+    [InlineData("haan ji", true)]
+    [InlineData("go ahead", true)]
+    [InlineData("yes and also open notepad", false)]
+    [InlineData("proceed with the cleanup of my desktop", false)]
+    [InlineData("no", false)]
+    [InlineData("", false)]
+    public void ConfirmationWordsAreShortAndStandalone(string text, bool expected) =>
+        Assert.Equal(expected, ConversationCoordinator.IsConfirmation(text));
+
+    [Fact]
     public async Task ExplicitFinishCommitsEverythingExactlyOnce()
     {
         await Wake();

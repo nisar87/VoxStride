@@ -290,6 +290,18 @@ public sealed class ConversationCoordinator : IAsyncDisposable
         switch (c.Kind)
         {
             case ControlKind.Content:
+                if (string.IsNullOrWhiteSpace(e.Text)) break; // a cough or click is not "keeping talking"
+                if (AwaitingExecuteConfirmation && IsConfirmation(e.Text))
+                {
+                    // We just asked "Ready to execute?" and the user answered with a short yes/proceed on its own.
+                    // That is an explicit answer to an explicit question, so it commits (the word itself is not content).
+                    Log.Info("voice", $"confirmation answer \"{e.Text.Trim()}\" in seg={e.SegmentId}");
+                    _naturalTurn = false;
+                    _buffer!.MarkControl(e.SegmentId);
+                    AwaitingExecuteConfirmation = false;
+                    BeginFinalize(e.StartMs);
+                    break;
+                }
                 if (AwaitingExecuteConfirmation) { AwaitingExecuteConfirmation = false; SetState(AgentState.Listening, "kept talking"); }
                 break;
             case ControlKind.Finish:
@@ -299,6 +311,15 @@ public sealed class ConversationCoordinator : IAsyncDisposable
                 BeginFinalize(string.IsNullOrWhiteSpace(c.Content) ? e.StartMs : e.StartMs + 1);
                 break;
             case ControlKind.FinishUncertain:
+                if (AwaitingExecuteConfirmation && IsConfirmation(e.Text))
+                {
+                    Log.Info("voice", $"confirmation answer \"{e.Text.Trim()}\" in seg={e.SegmentId}");
+                    _naturalTurn = false;
+                    _buffer!.MarkControl(e.SegmentId);
+                    AwaitingExecuteConfirmation = false;
+                    BeginFinalize(e.StartMs);
+                    break;
+                }
                 if (c.Content is not null) _buffer!.MarkControl(e.SegmentId, e.Text); // keep full text as content
                 AwaitingExecuteConfirmation = true;
                 SetState(AgentState.Clarifying, "finish phrase uncertain");
@@ -320,6 +341,24 @@ public sealed class ConversationCoordinator : IAsyncDisposable
                 _buffer!.MarkControl(e.SegmentId);
                 break;
         }
+    }
+
+    private static readonly HashSet<string> Confirmations = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "yes", "yeah", "yep", "yes please", "yes proceed", "yes go ahead", "yes do it", "yes execute", "proceed", "execute",
+        "go ahead", "do it", "go", "ok go", "okay go", "ok do it", "okay do it", "ok proceed", "okay proceed", "sure", "confirm",
+        "haan", "han", "ji", "ji haan", "haan ji", "theek hai", "chalo", "karo", "kar do",
+    };
+
+    /// <summary>
+    /// True when the whole utterance is a short yes/proceed (punctuation and "VoxStride" ignored). Only used right after
+    /// VoxStride asked "Ready to execute?", never as a finish phrase on its own.
+    /// </summary>
+    public static bool IsConfirmation(string text)
+    {
+        var words = new string(text.Select(ch => char.IsLetter(ch) || char.IsWhiteSpace(ch) ? char.ToLowerInvariant(ch) : ' ').ToArray())
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => w is not ("voxstride" or "vox" or "stride")).ToArray();
+        return words.Length is > 0 and <= 3 && Confirmations.Contains(string.Join(' ', words));
     }
 
     private async Task StartListeningAsync(string source)

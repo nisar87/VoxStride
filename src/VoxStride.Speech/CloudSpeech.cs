@@ -163,27 +163,50 @@ public sealed class NaturalSpeechSynthesizer(WindowsSpeechSynthesizer local, ICl
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         lock (_gate) _current = cts;
-        byte[]? wav = null;
-        if (Cloud is { } c)
-        {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-            timeout.CancelAfter(TimeSpan.FromSeconds(12)); // Gemini TTS can take several seconds for a long reply
-            try { wav = await c.SynthesizeAsync(text, timeout.Token).ConfigureAwait(false); } catch (OperationCanceledException) { }
-        }
+        if (Cloud is not { } c) { await local.SpeakAsync(text, cts.Token).ConfigureAwait(false); return; }
+
+        // Natural voices take a few seconds per request, growing with length. Synthesize the first sentence and the
+        // rest in parallel and start playing the first as soon as it is ready, so the user hears the reply sooner.
+        var (first, rest) = SpeechChunks.Split(text);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        var firstTask = SynthesizeSafeAsync(c, first, timeout.Token);
+        var restTask = rest is null ? Task.FromResult<byte[]?>(null) : SynthesizeSafeAsync(c, rest, timeout.Token);
+        var wav = await firstTask.ConfigureAwait(false);
         if (cts.IsCancellationRequested) { Log.Debug("tts", "speech interrupted before playback"); return; }
-        if (wav is null || wav.Length < 100)
+        if (wav is null)
         {
-            if (Cloud is not null) Log.Info("tts", $"natural voice unavailable after {sw.ElapsedMilliseconds} ms; using the Windows voice");
+            Log.Info("tts", $"natural voice unavailable after {sw.ElapsedMilliseconds} ms; using the Windows voice");
             await local.SpeakAsync(text, cts.Token).ConfigureAwait(false);
             return;
         }
-        Log.Info("tts", $"natural voice ready in {sw.ElapsedMilliseconds} ms, playing {(wav.Length - 44) / 48000.0:0.0}s");
+        Log.Info("tts", $"natural voice ready in {sw.ElapsedMilliseconds} ms (first part {first.Length} of {text.Length} chars)");
+        await PlayAsync(wav, cts.Token).ConfigureAwait(false);
+        if (rest is null || cts.IsCancellationRequested) return;
+        var wav2 = await restTask.ConfigureAwait(false);
+        if (cts.IsCancellationRequested) return;
+        if (wav2 is null) { Log.Info("tts", "natural voice missed the second part; using the Windows voice for it"); await local.SpeakAsync(rest, cts.Token).ConfigureAwait(false); return; }
+        await PlayAsync(wav2, cts.Token).ConfigureAwait(false);
+    }
+
+    private static async Task<byte[]?> SynthesizeSafeAsync(ICloudVoice voice, string text, CancellationToken ct)
+    {
+        try
+        {
+            var wav = await voice.SynthesizeAsync(text, ct).ConfigureAwait(false);
+            return wav is { Length: >= 100 } ? wav : null;
+        }
+        catch (OperationCanceledException) { return null; }
+    }
+
+    private async Task PlayAsync(byte[] wav, CancellationToken ct)
+    {
         var p = Marshal.AllocHGlobal(wav.Length);
         Marshal.Copy(wav, 0, p, wav.Length);
         lock (_gate) { FreePlaying(); _playing = p; }
         PlaySound(p, 0, SND_ASYNC | SND_MEMORY | SND_NODEFAULT);
-        var seconds = Math.Max(1, (wav.Length - 44) / (24000.0 * 2)); // OpenAI and Gemini voices are both 24 kHz mono 16-bit
-        try { await Task.Delay(TimeSpan.FromSeconds(seconds + 0.5), cts.Token).ConfigureAwait(false); } catch (OperationCanceledException) { }
+        var seconds = Math.Max(0.3, (wav.Length - 44) / (24000.0 * 2)); // OpenAI and Gemini voices are both 24 kHz mono 16-bit
+        try { await Task.Delay(TimeSpan.FromSeconds(seconds + 0.15), ct).ConfigureAwait(false); } catch (OperationCanceledException) { }
         lock (_gate) { if (_playing == p) { PlaySound(0, 0, 0); FreePlaying(); } }
     }
 

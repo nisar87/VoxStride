@@ -10,7 +10,7 @@
 - **Same breath:** "Hey VoxStride, how much space is left on C… VoxStride, execute" works too.
 - **Typed:** type into the box on the Home page and press **Enter**.
 - **Editing while you speak:** "scratch that" removes your last sentence, "replace that with …" replaces it, and "never mind" cancels. You can also correct the text in the box and press Run.
-- If VoxStride isn't sure you meant to finish (for example, you dictated the word "execute"), it asks **"Ready to execute?"**. Click **Proceed** to confirm.
+- If VoxStride isn't sure you meant to finish (for example, you said only "proceed" or "execute"), it asks **"Ready to execute?"**. Answer **"yes"** (or "proceed", "go ahead", "haan", "chalo") or click **Proceed**.
 
 ## 2a. If VoxStride doesn't understand your accent
 Open **Voice**, tick **Use cloud speech recognition**, choose **Automatic** (or OpenAI/Gemini), click **Save**, and restart when asked. This needs an OpenAI or Gemini key under Reasoning providers. It handles accented English and mixed Urdu/English much better than the built-in Windows engine. Your voice is sent only while you're giving an instruction, never in standby. If it misses quiet speech, move **Mic sensitivity** to the left.
