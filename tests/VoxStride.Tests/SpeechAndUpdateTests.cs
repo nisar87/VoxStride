@@ -283,3 +283,71 @@ public sealed class GeminiVoiceTests
         Assert.Equal("Kore", GeminiVoice.NormalizeVoice("kore"));
     }
 }
+
+public sealed class GeminiThinkingFallbackTests
+{
+    private sealed class Handler(Func<string, HttpResponseMessage> respond) : HttpMessageHandler
+    {
+        public List<string> Bodies { get; } = [];
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);
+            Bodies.Add(body);
+            return respond(body);
+        }
+    }
+
+    private static HttpResponseMessage Rejected(string level) => new(HttpStatusCode.BadRequest)
+    {
+        Content = new StringContent("{\"error\":{\"code\":400,\"message\":\"Thinking level " + level + " is not supported for this model. Please retry with other thinking level.\",\"status\":\"INVALID_ARGUMENT\"}}"),
+    };
+
+    private static HttpResponseMessage Text(string t) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent("{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"" + t + "\"}]}}]}"),
+    };
+
+    [Fact]
+    public async Task TranscriptionStepsDownWhenMinimalIsRejectedAndRemembersIt()
+    {
+        // Owner's log (0.7.3): gemini-3.8-flash answered 400 "Thinking level MINIMAL is not supported" to every sentence.
+        const string model = "gemini-3.8-flash-test-a";
+        var h = new Handler(b => b.Contains("\"minimal\"") ? Rejected("MINIMAL") : Text("Hi, how are you?"));
+        var t = new GeminiTranscriber("k", model, handler: h);
+        var r = await t.TranscribeAsync(new byte[100], null, CancellationToken.None);
+        Assert.True(r.Ok);
+        Assert.Equal("Hi, how are you?", r.Text);
+        Assert.Equal(2, h.Bodies.Count);
+        Assert.Contains("\"low\"", h.Bodies[1]);
+        await t.TranscribeAsync(new byte[100], null, CancellationToken.None);
+        Assert.Equal(3, h.Bodies.Count); // remembered: no second rejection
+    }
+
+    [Fact]
+    public async Task TranscriptionDropsTheSettingEntirelyIfNoLevelIsAccepted()
+    {
+        const string model = "gemini-3.8-flash-test-b";
+        var h = new Handler(b => b.Contains("thinkingConfig") ? Rejected("LOW") : Text("hello"));
+        var r = await new GeminiTranscriber("k", model, handler: h).TranscribeAsync(new byte[100], null, CancellationToken.None);
+        Assert.True(r.Ok);
+        Assert.DoesNotContain("thinkingConfig", h.Bodies[^1]);
+    }
+
+    [Fact]
+    public async Task OtherBadRequestsAreReportedNotRetried()
+    {
+        const string model = "gemini-3.8-flash-test-c";
+        var h = new Handler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("{\"error\":{\"message\":\"API key not valid\"}}") });
+        var r = await new GeminiTranscriber("k", model, handler: h).TranscribeAsync(new byte[100], null, CancellationToken.None);
+        Assert.False(r.Ok);
+        Assert.Single(h.Bodies);
+    }
+
+    [Fact]
+    public void AgentUsesLowAndOlderModelsAreLeftAlone()
+    {
+        Assert.Equal("low", GeminiThinking.LevelFor("gemini-3.8-flash-test-d", fast: false));
+        Assert.Equal("minimal", GeminiThinking.LevelFor("gemini-3.8-flash-test-d", fast: true));
+        Assert.Null(GeminiThinking.LevelFor("gemini-1.5-pro", fast: false));
+    }
+}

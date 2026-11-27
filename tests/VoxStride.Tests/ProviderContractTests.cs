@@ -187,6 +187,22 @@ public sealed class ProviderContractTests
     }
 
     [Fact]
+    public async Task Gemini_ThinkingLevelRejectionIsRetriedWithoutFailingTheTurn()
+    {
+        var h = new FixtureHandler(
+            FixtureHandler.Status(HttpStatusCode.BadRequest, "{\"error\":{\"code\":400,\"message\":\"Thinking level LOW is not supported for this model.\",\"status\":\"INVALID_ARGUMENT\"}}"),
+            FixtureHandler.Sse(Fixtures.GeminiText("I'm doing great, thanks!")));
+        var p = ProviderFactory.Create(new ProviderSettings(ProviderKind.Gemini, "gemini-3.8-flash-test-agent", "test-key-not-real"), h);
+        var conv = p.StartConversation("sys", [Fixtures.FreeSpace]);
+        conv.AddUserText("hi, how are you?");
+        var ev = await Fixtures.Collect(conv);
+        Assert.Empty(ev.OfType<ProviderErrorEvent>());
+        Assert.Equal(2, h.Requests.Count);
+        Assert.Contains("\"thinkingLevel\":\"low\"", h.Requests[0].Body);
+        Assert.DoesNotContain("thinkingConfig", h.Requests[1].Body);
+    }
+
+    [Fact]
     public async Task Gemini_ContinuationPreservesThoughtSignatureAndSendsFunctionResponse()
     {
         var h = new FixtureHandler(FixtureHandler.Sse(Fixtures.Gemini()), FixtureHandler.Sse(Fixtures.GeminiText("Done.")));

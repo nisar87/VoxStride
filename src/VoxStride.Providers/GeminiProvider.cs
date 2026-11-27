@@ -76,10 +76,17 @@ public sealed class GeminiProvider(ProviderSettings settings, HttpMessageHandler
                 ["generationConfig"] = GeminiThinking.Apply(new JsonObject { ["maxOutputTokens"] = p.Settings.MaxOutputTokens }, p.Model, fast: false),
             };
             var uri = new Uri(p.BaseUri(DefaultBase), "v1beta/models/" + Uri.EscapeDataString(p.Model) + ":streamGenerateContent?alt=sse");
-            using var req = new HttpRequestMessage(HttpMethod.Post, uri) { Content = Json(body) };
-            req.Headers.Add("x-goog-api-key", p.Settings.ApiKey);
-            var (resp, error) = await p.SendStreamingAsync(req, ct).ConfigureAwait(false);
-            if (error is not null) { yield return error; yield break; }
+            HttpResponseMessage? resp = null;
+            ProviderErrorEvent? error = null;
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                body["generationConfig"] = GeminiThinking.Apply(new JsonObject { ["maxOutputTokens"] = p.Settings.MaxOutputTokens }, p.Model, fast: false);
+                var req = new HttpRequestMessage(HttpMethod.Post, uri) { Content = Json(body) }; // not disposed here: the streamed response outlives this loop
+                req.Headers.Add("x-goog-api-key", p.Settings.ApiKey);
+                (resp, error) = await p.SendStreamingAsync(req, ct).ConfigureAwait(false);
+                if (error is null || !GeminiThinking.Rejected(p.Model, false, error.HttpStatus, error.Message)) break;
+            }
+            if (error is not null || resp is null) { yield return error ?? new ProviderErrorEvent(ProviderErrorKind.Unknown, "No response."); yield break; }
 
             var modelParts = new JsonArray();
             var pendingCalls = new List<ToolCallCompletedEvent>();
@@ -176,22 +183,52 @@ public sealed class GeminiProvider(ProviderSettings settings, HttpMessageHandler
 
 /// <summary>
 /// Gemini 3 models think at a high level by default, which made a simple voice request take ~14 s before the first
-/// token. A voice assistant needs fast turns, so VoxStride asks for little thinking: "low" for the agent (supported
-/// by Gemini 3 Flash and Pro) and "minimal" for transcription on Flash models. Gemini 2.5 Flash gets a zero
-/// thinking budget. Other models are left as they are.
+/// token. A voice assistant needs fast turns, so VoxStride asks for little thinking: "minimal" for transcription and
+/// "low" for the agent. Which levels a model accepts differs by model and changes over time, so this never assumes:
+/// when Google answers 400 about the thinking level, the next lower-commitment option is tried (finally no setting at
+/// all) and remembered for that model for the rest of the session.
 /// </summary>
 public static class GeminiThinking
 {
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> Step = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly string?[] FastLevels = ["minimal", "low", null];
+    private static readonly string?[] AgentLevels = ["low", null];
+
+    private static string Key(string model, bool fast) => model + (fast ? "|fast" : "|agent");
+
+    public static string? LevelFor(string model, bool fast)
+    {
+        var m = model.ToLowerInvariant();
+        if (!(m.StartsWith("gemini-3", StringComparison.Ordinal) || m.StartsWith("gemini-4", StringComparison.Ordinal))) return null;
+        var levels = fast ? FastLevels : AgentLevels;
+        return levels[Math.Min(Step.GetValueOrDefault(Key(model, fast)), levels.Length - 1)];
+    }
+
     public static JsonObject Apply(JsonObject generationConfig, string model, bool fast)
     {
         var m = model.ToLowerInvariant();
-        if (m.StartsWith("gemini-3", StringComparison.Ordinal) || m.StartsWith("gemini-4", StringComparison.Ordinal))
-        {
-            var level = fast && (m.Contains("flash", StringComparison.Ordinal)) ? "minimal" : "low";
+        if (LevelFor(model, fast) is { } level)
             generationConfig["thinkingConfig"] = new JsonObject { ["thinkingLevel"] = level };
-        }
-        else if (m.StartsWith("gemini-2.5-flash", StringComparison.Ordinal))
+        else if (m.StartsWith("gemini-2.5-flash", StringComparison.Ordinal) && Step.GetValueOrDefault(Key(model, fast)) == 0)
             generationConfig["thinkingConfig"] = new JsonObject { ["thinkingBudget"] = 0 };
         return generationConfig;
     }
+
+    /// <summary>
+    /// True when the error is Google rejecting the thinking setting; the next option is then used for this model,
+    /// so the caller should retry once more. False when there is nothing left to drop.
+    /// </summary>
+    public static bool Rejected(string model, bool fast, int? httpStatus, string? message)
+    {
+        if (httpStatus != 400 || message is null || !message.Contains("thinking", StringComparison.OrdinalIgnoreCase)) return false;
+        var key = Key(model, fast);
+        var hadSetting = Apply(new JsonObject(), model, fast).ContainsKey("thinkingConfig");
+        if (!hadSetting) return false;
+        Step.AddOrUpdate(key, 1, (_, v) => v + 1);
+        Log.Warn("ai", $"Gemini {model} rejected the thinking setting; now using {(LevelFor(model, fast) ?? "the model default")} ({message})");
+        return true;
+    }
+
+    /// <summary>Test hook.</summary>
+    public static void Reset() => Step.Clear();
 }

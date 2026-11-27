@@ -95,28 +95,33 @@ public sealed class GeminiTranscriber(string apiKey, string model, Uri? baseUri 
                     new JsonObject { ["text"] = instruction },
                     new JsonObject { ["inline_data"] = new JsonObject { ["mime_type"] = "audio/wav", ["data"] = Convert.ToBase64String(wav) } }),
             }),
-            ["generationConfig"] = GeminiThinking.Apply(new JsonObject { ["temperature"] = 0, ["maxOutputTokens"] = 512 }, model, fast: true),
         };
         var uri = new Uri(baseUri ?? new Uri(GeminiProvider.DefaultBase), "v1beta/models/" + Uri.EscapeDataString(model) + ":generateContent");
-        using var req = new HttpRequestMessage(HttpMethod.Post, uri) { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
-        req.Headers.Add("x-goog-api-key", apiKey);
         try
         {
-            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
-            var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            if (!resp.IsSuccessStatusCode)
+            for (var attempt = 0; ; attempt++)
             {
-                Log.Warn("speech", $"{Name} transcription HTTP {(int)resp.StatusCode} body={(text.Length > 600 ? text[..600] : text)}");
-                return new TranscriptionResult(false, "", $"{(int)resp.StatusCode}: {ProviderBase.SafeErrorMessage(text)}");
+                body["generationConfig"] = GeminiThinking.Apply(new JsonObject { ["temperature"] = 0, ["maxOutputTokens"] = 512 }, model, fast: true);
+                using var req = new HttpRequestMessage(HttpMethod.Post, uri) { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
+                req.Headers.Add("x-goog-api-key", apiKey);
+                using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+                var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var message = ProviderBase.SafeErrorMessage(text);
+                    if (attempt < 3 && GeminiThinking.Rejected(model, true, (int)resp.StatusCode, message)) continue; // retry with a level this model accepts
+                    Log.Warn("speech", $"{Name} transcription HTTP {(int)resp.StatusCode} body={(text.Length > 600 ? text[..600] : text)}");
+                    return new TranscriptionResult(false, "", $"{(int)resp.StatusCode}: {message}");
+                }
+                var parts = JsonNode.Parse(text)?["candidates"]?[0]?["content"]?["parts"] as JsonArray;
+                var sb = new StringBuilder();
+                if (parts is not null)
+                    foreach (var p in parts)
+                        if (p?["thought"]?.GetValue<bool>() != true && p?["text"] is JsonValue t) sb.Append(t.GetValue<string>());
+                var transcript = sb.ToString().Trim().Trim('"');
+                Log.Info("speech", $"{Name} transcribed audio={SpeechHttp.Seconds(wav):0.0}s thinking={GeminiThinking.LevelFor(model, true) ?? "default"} text={Log.Text(transcript)}");
+                return new TranscriptionResult(true, transcript);
             }
-            var parts = JsonNode.Parse(text)?["candidates"]?[0]?["content"]?["parts"] as JsonArray;
-            var sb = new StringBuilder();
-            if (parts is not null)
-                foreach (var p in parts)
-                    if (p?["thought"]?.GetValue<bool>() != true && p?["text"] is JsonValue t) sb.Append(t.GetValue<string>());
-            var transcript = sb.ToString().Trim().Trim('"');
-            Log.Info("speech", $"{Name} transcribed audio={SpeechHttp.Seconds(wav):0.0}s text={Log.Text(transcript)}");
-            return new TranscriptionResult(true, transcript);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {
