@@ -17,9 +17,11 @@ public static class Program
         var subscribe = new CheckBox { Left = 20, Top = 110, Width = 200, Text = "Subscribe", Name = "SubscribeBox" };
         var danger = new Button { Left = 20, Top = 150, Width = 200, Height = 32, Text = "Delete everything", Name = "DangerButton" };
         var notes = new TextBox { Left = 20, Top = 195, Width = 440, AccessibleName = "Notes", Name = "NotesBox" };
+        var freeze = new Button { Left = 240, Top = 150, Width = 120, Height = 32, Text = "Freeze", Name = "FreezeButton" };
+        freeze.Click += (_, _) => Thread.Sleep(20_000); // simulates a hung app (UI thread blocked)
         greet.Click += (_, _) => greeting.Text = "Hello, " + name.Text + "!";
         danger.Click += (_, _) => greeting.Text = "DANGER PRESSED";
-        form.Controls.AddRange([name, greet, greeting, subscribe, danger, notes]);
+        form.Controls.AddRange([name, greet, greeting, subscribe, danger, notes, freeze]);
         Application.Run(form);
     }
 }

@@ -128,3 +128,82 @@ public sealed class UiAutomationTests(ITestOutputHelper output) : IDisposable
         _ui.Dispose();
     }
 }
+
+/// <summary>P4 gate: ≥100 attempts per workflow class with ≥95% verified success, and a hung app never hangs VoxStride.</summary>
+public sealed class UiAutomationGateTests(ITestOutputHelper output) : IDisposable
+{
+    private readonly WindowsUiAutomation _ui = new();
+    private Process? _fixture;
+
+    private async Task<UiWindow> Start(string title)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "VoxStride.sln"))) dir = dir.Parent;
+        var exe = Directory.GetFiles(Path.Combine(dir!.FullName, "tests", "VoxStride.UiFixture", "bin"), "VoxStride.UiFixture.exe", SearchOption.AllDirectories).OrderByDescending(File.GetLastWriteTimeUtc).First();
+        _fixture = Process.Start(new ProcessStartInfo(exe, $"\"{title}\"") { UseShellExecute = false })!;
+        for (var i = 0; i < 100; i++)
+        {
+            await Task.Delay(100);
+            if ((await _ui.ListWindowsAsync(CancellationToken.None)).FirstOrDefault(x => x.ProcessId == _fixture.Id) is { } w) return w;
+        }
+        throw new TimeoutException("fixture did not start");
+    }
+
+    [Fact]
+    public async Task Gate_100AttemptsPerWorkflowClass_AtLeast95PercentVerified()
+    {
+        var w = await Start("Gate " + Guid.NewGuid().ToString("N")[..6]);
+        int setOk = 0, invokeOk = 0, toggleOk = 0;
+        const int n = 100;
+        for (var i = 0; i < n; i++)
+        {
+            var snap = await _ui.ObserveAsync(w.Id, null, 150, CancellationToken.None);
+            if (snap is null) continue;
+            var box = snap.Elements.First(e => e.Name == "Your name" && e.Role == "edit");
+            var name = "N" + i;
+            var set = await _ui.SetValueAsync(w.Id, box.Id, name, CancellationToken.None);
+            if (set.Ok && set.NewValue == name) setOk++;
+            var greet = snap.Elements.First(e => e.Name == "Greet");
+            if ((await _ui.InvokeAsync(w.Id, greet.Id, "invoke", CancellationToken.None)).Ok)
+            {
+                for (var t = 0; t < 20; t++)
+                {
+                    var check = await _ui.ObserveAsync(w.Id, "Hello", 50, CancellationToken.None);
+                    if (check?.Elements.Any(e => e.Name == $"Hello, {name}!") == true) { invokeOk++; break; }
+                    await Task.Delay(25);
+                }
+            }
+            var sub = snap.Elements.First(e => e.Name == "Subscribe");
+            var tog = await _ui.InvokeAsync(w.Id, sub.Id, "toggle", CancellationToken.None);
+            if (tog.Ok && tog.Verified) toggleOk++;
+        }
+        output.WriteLine($"E2E-UI-GATE: set-value {setOk}/{n}, invoke+verify {invokeOk}/{n}, toggle {toggleOk}/{n}");
+        Assert.True(setOk >= 95, $"set value {setOk}/{n}");
+        Assert.True(invokeOk >= 95, $"invoke {invokeOk}/{n}");
+        Assert.True(toggleOk >= 95, $"toggle {toggleOk}/{n}");
+    }
+
+    [Fact]
+    public async Task HungAppTimesOutWithoutBlockingVoxStride()
+    {
+        var w = await Start("Hang " + Guid.NewGuid().ToString("N")[..6]);
+        var snap = await _ui.ObserveAsync(w.Id, null, 150, CancellationToken.None);
+        var freeze = snap!.Elements.First(e => e.Name == "Freeze");
+        var sw = Stopwatch.StartNew();
+        var r = await _ui.InvokeAsync(w.Id, freeze.Id, "invoke", CancellationToken.None); // the app blocks its UI thread for 20 s
+        var observeHung = await _ui.ObserveAsync(w.Id, null, 150, CancellationToken.None);
+        var elapsed = sw.Elapsed;
+        // Other windows still work immediately: the hung worker was replaced.
+        var list = await _ui.ListWindowsAsync(CancellationToken.None);
+        output.WriteLine($"E2E-UI: hung app — invoke ok={r.Ok} error={r.Error}, observe={(observeHung is null ? "timed out" : "answered")}, total {elapsed.TotalSeconds:0.0}s, windows still listed: {list.Count}");
+        Assert.True(elapsed < TimeSpan.FromSeconds(19), "calls into a hung app must time out, not wait for it");
+        Assert.NotEmpty(list);
+    }
+
+    public void Dispose()
+    {
+        try { if (_fixture is { HasExited: false }) _fixture.Kill(); } catch (Exception) { }
+        _fixture?.Dispose();
+        _ui.Dispose();
+    }
+}
