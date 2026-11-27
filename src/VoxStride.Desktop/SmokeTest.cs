@@ -28,6 +28,8 @@ public static class SmokeTest
         var ok = true;
         var settings = new AppSettings { ActiveProvider = null, SpeakResults = false, WakeWordEnabled = false };
         var sw = Stopwatch.StartNew();
+        DiagnosticsLog.Start(includeContent: true); // exercises the real file logger on the installed build
+        Log.Info("app", "smoke test starting");
         try
         {
             await using var host = new AppHost(settings, new DenyApprovals(), enableSpeech: false);
@@ -42,6 +44,22 @@ public static class SmokeTest
                 ok &= pass;
                 results.Add(new { text, r.Success, r.SpokenSummary, ms = t.Elapsed.TotalMilliseconds, pass });
             }
+            // The real diagnostics file must contain the full trail of those runs.
+            DiagnosticsLog.Flush(TimeSpan.FromSeconds(5));
+            string logText;
+            using (var fs = new FileStream(DiagnosticsLog.FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var reader = new StreamReader(fs)) logText = reader.ReadToEnd();
+            var logChecks = new
+            {
+                session = logText.Contains("smoke test starting", StringComparison.Ordinal),
+                route = logText.Contains("route=Direct", StringComparison.Ordinal),
+                toolStep = logText.Contains("system_get_free_space -> outcome=Success", StringComparison.Ordinal),
+                runEnd = logText.Contains("end success=True", StringComparison.Ordinal),
+                noProvider = logText.Contains("provider=NONE", StringComparison.Ordinal),
+                format = System.Text.RegularExpressions.Regex.IsMatch(logText, @"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} [+-]\d\d:\d\d (DBG|INF|WRN|ERR) ", System.Text.RegularExpressions.RegexOptions.Multiline),
+            };
+            var logOk = logChecks.session && logChecks.route && logChecks.toolStep && logChecks.runEnd && logChecks.noProvider && logChecks.format;
+            ok &= logOk;
             using var proc = Process.GetCurrentProcess();
             proc.Refresh();
             var evidence = new
@@ -54,6 +72,7 @@ public static class SmokeTest
                 apps = host.Apps.Snapshot().Count,
                 hasNotepad = host.Apps.Resolve("notepad").App is not null,
                 results,
+                log = new { path = DiagnosticsLog.FilePath, bytes = logText.Length, checks = logChecks, passed = logOk },
                 status = ok ? "passed" : "failed",
             };
             await File.WriteAllTextAsync(outPath, JsonSerializer.Serialize(evidence, new JsonSerializerOptions { WriteIndented = true }));
