@@ -36,6 +36,17 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // Started by Chrome/Edge as the VoxStride extension's native messaging host: relay only, no UI, no single-instance lock.
+        if (e.Args.FirstOrDefault(a => a.StartsWith("chrome-extension://", StringComparison.Ordinal)) is { } caller)
+        {
+            DiagnosticsLog.Start(includeContent: false);
+            Log.Info("http", "native host relay started for " + caller);
+            var code = await VoxStride.Core.Tools.NativeHostRelay.RunAsync(caller, Console.OpenStandardInput(), Console.OpenStandardOutput());
+            Log.Info("http", "native host relay stopped");
+            DiagnosticsLog.Flush(TimeSpan.FromSeconds(1));
+            Shutdown(code);
+            return;
+        }
         if (e.Args.Contains("--smoke-test"))
         {
             var code = await SmokeTest.RunAsync(e.Args);
@@ -108,6 +119,7 @@ public partial class App : Application
                 $"event {ev.Phase} state={ev.State}" + (ev.RunId == Guid.Empty ? "" : " run=" + ev.RunId.ToString("N")[..8]) + (ev.StepId is null ? "" : " step=" + ev.StepId) + " message=" + Log.Text(ev.Message, 300), null);
         };
         h.Conversation.Committed += c => Dispatcher.BeginInvoke(() => _vm.AddActivity("You: " + c.FinalizedTranscript, "🗣"));
+        h.Extension.ConnectionChanged += on => Dispatcher.BeginInvoke(() => _vm.AddActivity(on ? $"Your browser is connected ({h.Extension.BrowserVersion}). I'll use it for web tasks on sites you allow." : "Your browser's VoxStride extension disconnected. I'll use my own browser window.", "🌐"));
         h.Broker.Blocked += (tool, reason) => Dispatcher.BeginInvoke(() => _vm.AddActivity($"Blocked {tool}: {reason}", "⛔"));
     }
 

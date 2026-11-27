@@ -12,5 +12,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\VoxStride.Windows\VoxStride.Windows.csproj" />
     <ProjectReference Include="..\..\src\VoxStride.Speech\VoxStride.Speech.csproj" />
+    <ProjectReference Include="..\..\src\VoxStride.Browser\VoxStride.Browser.csproj" />
   </ItemGroup>
 </Project>

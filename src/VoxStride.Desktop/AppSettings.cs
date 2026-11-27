@@ -64,6 +64,8 @@ public sealed class AppSettings
     /// <summary>Opt-in natural mode: a pause ends the turn, but such turns may only read and answer (changes still need "VoxStride, execute").</summary>
     public bool NaturalMode { get; set; }
     public double NaturalPauseSeconds { get; set; } = 1.5;
+    /// <summary>When the VoxStride extension is connected, act in the user's own Chrome/Edge instead of VoxStride's browser window.</summary>
+    public bool UseMyBrowser { get; set; } = true;
     /// <summary>Apps VoxStride must never open or control (names or exe names).</summary>
     public List<string> BlockedApps { get; set; } = [];
     /// <summary>Websites VoxStride must never visit (domains; subdomains included).</summary>

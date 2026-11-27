@@ -24,6 +24,17 @@ try {
   Step 'uninstall-entry-hkcu' ($null -ne $uninst) 'per-user uninstall registration'
   Step 'no-admin-required' (-not (Test-Path (Join-Path $env:ProgramFiles 'VoxStride'))) 'not installed under Program Files'
 
+  $hostJson = Join-Path $appDir 'browser-extension\com.voxstride.bridge.json'
+  Step 'browser-host-manifest' (Test-Path $hostJson) $hostJson
+  $hostDef = Get-Content $hostJson -Raw | ConvertFrom-Json
+  Step 'browser-host-path' ($hostDef.path -eq $exe) $hostDef.path
+  Step 'browser-host-origin' ($hostDef.allowed_origins.Count -eq 1 -and $hostDef.allowed_origins[0] -like 'chrome-extension://*/') ($hostDef.allowed_origins -join ',')
+  foreach ($b in @('Google\Chrome', 'Microsoft\Edge')) {
+    $k = "HKCU:\Software\$b\NativeMessagingHosts\com.voxstride.bridge"
+    Step "browser-host-registered-$($b.Split('\')[0])" ((Get-ItemProperty -Path $k -ErrorAction SilentlyContinue).'(default)' -eq $hostJson) $k
+  }
+  Step 'extension-files' ((Test-Path (Join-Path $appDir 'browser-extension\manifest.json')) -and (Test-Path (Join-Path $appDir 'browser-extension\background.js'))) 'manifest.json, background.js'
+
   $smoke = Join-Path $env:TEMP 'voxstride-smoke-installed.json'
   $p = Start-Process -FilePath $exe -ArgumentList '--smoke-test', '--out', $smoke -Wait -PassThru
   $smokeJson = if (Test-Path $smoke) { Get-Content $smoke -Raw } else { '{}' }
@@ -35,6 +46,7 @@ try {
   Start-Sleep -Seconds 3
   Step 'uninstall-exit-code' ($p.ExitCode -eq 0) "exit $($p.ExitCode)"
   Step 'app-removed' (-not (Test-Path $exe)) $exe
+  Step 'browser-host-unregistered' (-not (Test-Path 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.voxstride.bridge')) 'native host key removed'
   Step 'data-removed' (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'VoxStride'))) 'user data folder removed on silent uninstall'
   $result.status = 'passed'
 }

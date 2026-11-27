@@ -4,6 +4,7 @@
 #ifndef AppVersion
   #define AppVersion "0.1.0"
 #endif
+#define ExtensionId "ljfgkidknpjooifilobgenemahnnefop"
 #ifndef SourceDir
   #define SourceDir "..\artifacts\publish\win-x64"
 #endif
@@ -43,12 +44,17 @@ Name: "startup"; Description: "Start VoxStride when I sign in"; GroupDescription
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Browser extension for the user's own Chrome/Edge (loaded unpacked by the user; see Settings > Browser).
+Source: "..\extension\*"; DestDir: "{app}\browser-extension"; Flags: ignoreversion
 
 [Icons]
 Name: "{userprograms}\VoxStride"; Filename: "{app}\VoxStride.exe"
 Name: "{userdesktop}\VoxStride"; Filename: "{app}\VoxStride.exe"; Tasks: desktopicon
 
 [Registry]
+; Native messaging host for the VoxStride extension (per-user; removed on uninstall).
+Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\com.voxstride.bridge"; ValueType: string; ValueName: ""; ValueData: "{app}\browser-extension\com.voxstride.bridge.json"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\com.voxstride.bridge"; ValueType: string; ValueName: ""; ValueData: "{app}\browser-extension\com.voxstride.bridge.json"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "VoxStride"; ValueData: """{app}\VoxStride.exe"" --background"; Flags: uninsdeletevalue; Tasks: startup
 
 [Run]
@@ -66,6 +72,26 @@ Type: filesandordirs; Name: "{app}"
 function ShouldRelaunch: Boolean;
 begin
   Result := ExpandConstant('{param:relaunch|0}') = '1';
+end;
+
+// Native host manifest: only the VoxStride extension id may launch the bridge.
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Json, ExePath: string;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    ExePath := ExpandConstant('{app}\VoxStride.exe');
+    StringChangeEx(ExePath, '\', '\\', True);
+    Json := '{' + #13#10 +
+            '  "name": "com.voxstride.bridge",' + #13#10 +
+            '  "description": "VoxStride browser bridge",' + #13#10 +
+            '  "path": "' + ExePath + '",' + #13#10 +
+            '  "type": "stdio",' + #13#10 +
+            '  "allowed_origins": ["chrome-extension://{#ExtensionId}/"]' + #13#10 +
+            '}';
+    SaveStringToFile(ExpandConstant('{app}\browser-extension\com.voxstride.bridge.json'), Json, False);
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

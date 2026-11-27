@@ -60,7 +60,7 @@ public static class VideoLayout
     }
 }
 
-public sealed class BrowserOpenUrlTool(IBrowserController browser, VoxStride.Core.Policy.UserPermissions? permissions = null) : ToolBase
+public sealed class BrowserOpenUrlTool(IBrowserController browser, VoxStride.Core.Policy.UserPermissions? permissions = null, WebSession? web = null) : ToolBase
 {
     public override ToolDefinition Definition { get; } = new(
         "browser_open_url", "Open an https URL in VoxStride's visible browser window.",
@@ -78,6 +78,14 @@ public sealed class BrowserOpenUrlTool(IBrowserController browser, VoxStride.Cor
 
     public override async ValueTask<ToolResult> ExecuteAsync(JsonObject args, ToolContext ctx, CancellationToken ct)
     {
+        if (web is { } w && w.Current is { } target && target is not IBrowserController)
+        {
+            // The user's own browser (extension): navigate the active tab there.
+            var r = await target.NavigateAsync(null, new Uri(Str(args, "url")), ct);
+            if (!r.Ok) return ToolResult.Fail(r.Error ?? "navigate_failed", r.Message ?? "Your browser didn't open it.");
+            ctx.Items["page"] = new PageState(r.Url ?? Str(args, "url"), r.Title ?? "");
+            return ToolResult.Ok(new JsonObject { ["url"] = r.Url, ["browser"] = target.Name }, "I've opened it in your browser.", false);
+        }
         var page = await browser.OpenUrlAsync(new Uri(Str(args, "url")), ct);
         ctx.Items["page"] = page;
         return ToolResult.Ok(new JsonObject { ["url"] = page.Url, ["title"] = page.Title }, $"I've opened {page.Title}.", false);

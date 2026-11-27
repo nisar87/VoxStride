@@ -9,7 +9,7 @@ namespace VoxStride.Browser;
 /// installed Microsoft Edge (or Chrome). No cookies, storage or credentials are read. Page content is treated
 /// as untrusted observation only. The user signs in manually when a site requires it.
 /// </summary>
-public sealed class PlaywrightBrowserController : IBrowserController, IAsyncDisposable
+public sealed class PlaywrightBrowserController : IBrowserController, IWebAutomation, IAsyncDisposable
 {
     private readonly string _profileDir;
     private readonly string _channel;
@@ -153,6 +153,113 @@ public sealed class PlaywrightBrowserController : IBrowserController, IAsyncDisp
         try { if (await reject.IsVisibleAsync().ConfigureAwait(false)) await reject.ClickAsync(new LocatorClickOptions { Timeout = 3000 }).ConfigureAwait(false); }
         catch (Exception) { }
     }
+
+    // ---------------- IWebAutomation (generic browsing) ----------------
+    public string Name => "VoxStride browser";
+    public bool IsAvailable => true;
+
+    public static readonly string PageScript = LoadScript();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _nonces = new(StringComparer.Ordinal);
+
+    private static string LoadScript()
+    {
+        using var s = typeof(PlaywrightBrowserController).Assembly.GetManifestResourceStream("voxstride-page.js") ?? throw new InvalidOperationException("page script missing");
+        using var r = new StreamReader(s);
+        return r.ReadToEnd();
+    }
+
+    private IPage? Tab(string? tabId)
+    {
+        var pages = _ctx?.Pages.Where(p => !p.IsClosed).ToList();
+        if (pages is null || pages.Count == 0) return null;
+        if (tabId is { Length: > 1 } && tabId[0] == 'p' && int.TryParse(tabId[1..], out var i) && i >= 0 && i < pages.Count) return pages[i];
+        return pages[^1];
+    }
+
+    private string TabIdOf(IPage page) => "p" + (_ctx?.Pages.Where(p => !p.IsClosed).ToList().IndexOf(page) ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string OriginOf(string url) => Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.GetLeftPart(UriPartial.Authority) : url;
+
+    public async Task<WebObservation?> ObserveAsync(string? tabId, int maxElements, CancellationToken ct)
+    {
+        var page = Tab(tabId);
+        if (page is null || page.Url.StartsWith("about:", StringComparison.Ordinal)) return null;
+        await page.EvaluateAsync(PageScript).ConfigureAwait(false);
+        var o = await page.EvaluateAsync<JsonElement>("m => window.__voxstride.observe(m)", maxElements).ConfigureAwait(false);
+        var tab = TabIdOf(page);
+        _nonces[tab] = o.GetProperty("nonce").GetString()!;
+        return NativeMessaging.ParseObservation(System.Text.Json.Nodes.JsonNode.Parse(o.GetRawText())!, tab, Name); // same parser as the extension bridge
+    }
+
+    private (IPage? Page, string? Nonce, WebActionResult? Error) Target(WebObservation obs)
+    {
+        var page = Tab(obs.TabId);
+        if (page is null) return (null, null, new WebActionResult(false, "tab_gone", "That tab was closed."));
+        if (OriginOf(page.Url) != obs.Origin) return (null, null, new WebActionResult(false, "origin_changed", $"The tab is now on {OriginOf(page.Url)}, not {obs.Origin}. Observe again."));
+        if (!_nonces.TryGetValue(obs.TabId, out var nonce)) return (null, null, new WebActionResult(false, "observe_first", "Observe the page again."));
+        return (page, nonce, null);
+    }
+
+    public async Task<WebActionResult> NavigateAsync(string? tabId, Uri url, CancellationToken ct)
+    {
+        var page = Tab(tabId) ?? await PageAsync(ct).ConfigureAwait(false);
+        await page.BringToFrontAsync().ConfigureAwait(false);
+        await page.GotoAsync(url.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30000 }).ConfigureAwait(false);
+        return new WebActionResult(true, Url: page.Url, Title: await page.TitleAsync().ConfigureAwait(false), Verified: true);
+    }
+
+    public async Task<WebActionResult> ClickAsync(WebObservation obs, string elementId, CancellationToken ct)
+    {
+        var (page, nonce, err) = Target(obs);
+        if (err is not null) return err;
+        var loc = page!.Locator($"[data-voxstride=\"{nonce}:{elementId}\"]");
+        if (await loc.CountAsync().ConfigureAwait(false) == 0) return new WebActionResult(false, "element_gone", "That element is gone (the page changed). Observe again.");
+        var before = page.Url;
+        try { await loc.First.ClickAsync(new LocatorClickOptions { Timeout = 10000 }).ConfigureAwait(false); }
+        catch (TimeoutException) { return new WebActionResult(false, "not_clickable", "That element couldn't be clicked (it may be covered or hidden)."); }
+        try { await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded, new PageWaitForLoadStateOptions { Timeout = 5000 }).ConfigureAwait(false); } catch (TimeoutException) { }
+        return new WebActionResult(true, Message: page.Url != before ? "Opened " + await page.TitleAsync().ConfigureAwait(false) + "." : "Clicked.", Url: page.Url, Title: await page.TitleAsync().ConfigureAwait(false), Verified: true);
+    }
+
+    public async Task<WebActionResult> FillAsync(WebObservation obs, string elementId, string text, bool pressEnter, CancellationToken ct)
+    {
+        var (page, nonce, err) = Target(obs);
+        if (err is not null) return err;
+        var loc = page!.Locator($"[data-voxstride=\"{nonce}:{elementId}\"]").First;
+        if (await loc.CountAsync().ConfigureAwait(false) == 0) return new WebActionResult(false, "element_gone", "That field is gone (the page changed). Observe again.");
+        if (await loc.GetAttributeAsync("type").ConfigureAwait(false) is "password") return new WebActionResult(false, "sensitive_field", "I never fill in password fields.");
+        await loc.FillAsync(text, new LocatorFillOptions { Timeout = 10000 }).ConfigureAwait(false);
+        string? value;
+        try { value = await loc.InputValueAsync().ConfigureAwait(false); } catch (PlaywrightException) { value = await loc.TextContentAsync().ConfigureAwait(false); }
+        if (pressEnter)
+        {
+            await loc.PressAsync("Enter").ConfigureAwait(false);
+            try { await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded, new PageWaitForLoadStateOptions { Timeout = 8000 }).ConfigureAwait(false); } catch (TimeoutException) { }
+        }
+        return new WebActionResult(true, Url: page.Url, Title: await page.TitleAsync().ConfigureAwait(false), Value: value, Verified: value == text);
+    }
+
+    public async Task<WebActionResult> BackAsync(string? tabId, CancellationToken ct)
+    {
+        var page = Tab(tabId);
+        if (page is null) return new WebActionResult(false, "no_page", "There's no page to go back from.");
+        var r = await page.GoBackAsync(new PageGoBackOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 15000 }).ConfigureAwait(false);
+        return r is null ? new WebActionResult(false, "no_history", "There's no previous page.") : new WebActionResult(true, Url: page.Url, Title: await page.TitleAsync().ConfigureAwait(false), Verified: true);
+    }
+
+    /// <summary>Collects video cards from the current page exactly as YouTubeSearchAsync does (layout fixtures in tests).</summary>
+    public async Task<IReadOnlyList<VideoCard>> CollectVideoCardsAsync(CancellationToken ct)
+    {
+        var page = Tab(null) ?? throw new InvalidOperationException("no page");
+        var json = await page.EvaluateAsync<JsonElement>(CollectCardsJs).ConfigureAwait(false);
+        return Parse(json);
+    }
+
+    /// <summary>Test hook: resizes the VoxStride browser viewport (responsive layout fixtures).</summary>
+    public Task ResizeForTestAsync(int width, int height) => (Tab(null) ?? throw new InvalidOperationException("no page")).SetViewportSizeAsync(width, height);
+
+    /// <summary>Test hook: opens a non-https URL (e.g. a local fixture server). The browser_open_url tool only allows public https.</summary>
+    public async Task<WebActionResult> OpenForTestAsync(Uri url, CancellationToken ct) => await NavigateAsync(null, url, ct).ConfigureAwait(false);
 
     public async ValueTask DisposeAsync()
     {

@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "VoxStride",
+  "version": "1.0.0",
+  "description": "Lets the VoxStride desktop assistant read and act on your current tab, only on sites you allow.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzbTNFhw/dIVULp9r8PIuDRBf3DiLhmwwehV0R9vq+Dm+uHf/o/9gC7cacu417B3uYRTJuttHv6u51ToRg3ILSazT4Q4cZuDneuf5XfHB7Vegz2Wra90EYxE1tiPy6O51usc06jX6hQ6tOEPdDdCEecpJClHQrkWhDT5i+6vVglFRnAmf9LFcev04QfJbJqRqUvQiQcu4fbEC8J+LG+3tHftdCY/N3IMEOq/l4XPkTMVOPp0YdlrSeah8Ie897AXqsQRC3yW72STFYm6Gl0QwQk1ToyrcoQ2T+fot3YCNu9pPE3YBEwzFKTKS3AoVbryQP4VIOXZdYRDr5egc6bO4fQIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": ["nativeMessaging", "activeTab", "scripting", "storage", "alarms"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "VoxStride" }
+}

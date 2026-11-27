@@ -115,6 +115,12 @@ public sealed class AppHost : IAsyncDisposable
     /// <summary>The user's blocked apps/sites and screen-capture choice (Settings › Permissions).</summary>
     public UserPermissions Permissions { get; }
     public WindowsUiAutomation UiAutomation { get; }
+    /// <summary>The VoxStride extension's fixed id (from the public key in extension/manifest.json).</summary>
+    public const string ExtensionId = "ljfgkidknpjooifilobgenemahnnefop";
+    public ExtensionBrowser Extension { get; }
+    public BrowserBridgeServer Bridge { get; }
+    /// <summary>Browser tools' target: the user's browser via the extension when connected, else VoxStride's own window.</summary>
+    public WebSession Web { get; }
     /// <summary>UI Automation tools' shared state (recent observations/screenshots).</summary>
     public UiSession Ui { get; }
     public IUserApproval Approvals { get; }
@@ -132,6 +138,9 @@ public sealed class AppHost : IAsyncDisposable
         var controller = new WindowsAppController();
 
         Permissions = new UserPermissions(() => settings.BlockedApps, () => settings.BlockedSites, () => settings.ScreenCapture);
+        Extension = new ExtensionBrowser([ExtensionId], () => settings.UseMyBrowser);
+        Bridge = new BrowserBridgeServer(Extension);
+        Web = new WebSession(Browser, () => Extension, Permissions);
         UiAutomation = new WindowsUiAutomation();
         Ui = new UiSession(UiAutomation, Permissions);
         Scope = new FileScope(new WindowsKnownFolders(), () => settings.AllowedFolders,
@@ -146,7 +155,8 @@ public sealed class AppHost : IAsyncDisposable
             .Add(new EditorWriteTool(new WindowsEditorAdapter(Apps), Apps))
             .Add(new ListWindowsTool(Ui)).Add(new FocusWindowTool(Ui)).Add(new ObserveUiTool(Ui)).Add(new InvokeUiTool(Ui))
             .Add(new SetValueUiTool(Ui)).Add(new TypeTextUiTool(Ui)).Add(new CaptureWindowTool(Ui)).Add(new ClickUiTool(Ui))
-            .Add(new BrowserOpenUrlTool(Browser, Permissions)).Add(new YouTubePlayTool(Browser)).Add(new ChatGptDraftTool(Browser));
+            .Add(new WebObserveTool(Web)).Add(new WebSearchTool(Web)).Add(new WebClickTool(Web)).Add(new WebFillTool(Web)).Add(new WebBackTool(Web))
+            .Add(new BrowserOpenUrlTool(Browser, Permissions, Web)).Add(new YouTubePlayTool(Browser)).Add(new ChatGptDraftTool(Browser));
 
         Broker = new ToolBroker(Registry, Authority, Store, approvals, Rules, Events, time);
         Providers = new ProviderSelector(settings, Secrets, Store);
@@ -318,6 +328,8 @@ public sealed class AppHost : IAsyncDisposable
         var unresolved = await Store.GetUnresolvedMovesAsync(ct);
         if (unresolved.Count > 0)
             Events.Publish(Guid.Empty, AgentState.Standby, "recovery", $"{unresolved.Count} file move(s) from an interrupted task could not be confirmed. They were not repeated. See History.", canCancel: false);
+        Bridge.Start();
+        Log.Info("http", $"browser bridge listening on pipe {Bridge.PipeName} for extension {ExtensionId}");
         StartMicWatch();
         await StartWakeAsync();
     }
@@ -420,6 +432,7 @@ public sealed class AppHost : IAsyncDisposable
         Microphone.Dispose();
         await Browser.DisposeAsync();
         UiAutomation.Dispose();
+        Bridge.Dispose();
         Speech?.Dispose();
         Store.Dispose();
     }

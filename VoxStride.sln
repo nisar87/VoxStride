@@ -31,6 +31,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxStride.Tests.Persistence
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxStride.UiFixture", "tests\VoxStride.UiFixture\VoxStride.UiFixture.csproj", "{0D9922E3-5084-40B1-B2C2-D0AC729C7BF0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxStride.TestNativeHost", "tests\VoxStride.TestNativeHost\VoxStride.TestNativeHost.csproj", "{16E45809-9AA1-418D-933B-9E15DCE5166E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -185,6 +187,18 @@ Global
 		{0D9922E3-5084-40B1-B2C2-D0AC729C7BF0}.Release|x64.Build.0 = Release|Any CPU
 		{0D9922E3-5084-40B1-B2C2-D0AC729C7BF0}.Release|x86.ActiveCfg = Release|Any CPU
 		{0D9922E3-5084-40B1-B2C2-D0AC729C7BF0}.Release|x86.Build.0 = Release|Any CPU
+		{16E45809-9AA1-418D-933B-9E15DCE5166E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{16E45809-9AA1-418D-933B-9E15DCE5166E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{16E45809-9AA1-418D-933B-9E15DCE5166E}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{16E45809-9AA1-418D-933B-9E15DCE5166E}.Debug|x64.Build.0 = Debug|Any CPU
+		{16E45809-9AA1-418D-933B-9E15DCE5166E}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{16E45809-9AA1-418D-933B-9E15DCE5166E}.Debug|x86.Build.0 = Debug|Any CPU
+		{16E45809-9AA1-418D-933B-9E15DCE5166E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{16E45809-9AA1-418D-933B-9E15DCE5166E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{16E45809-9AA1-418D-933B-9E15DCE5166E}.Release|x64.ActiveCfg = Release|Any CPU
+		{16E45809-9AA1-418D-933B-9E15DCE5166E}.Release|x64.Build.0 = Release|Any CPU
+		{16E45809-9AA1-418D-933B-9E15DCE5166E}.Release|x86.ActiveCfg = Release|Any CPU
+		{16E45809-9AA1-418D-933B-9E15DCE5166E}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -202,5 +216,6 @@ Global
 		{CFB02B68-F90E-4C07-AC4D-9AB7211DA6CB} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{35775B22-1DA5-4DA3-8E60-A7FA6A78367F} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{0D9922E3-5084-40B1-B2C2-D0AC729C7BF0} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{16E45809-9AA1-418D-933B-9E15DCE5166E} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

@@ -211,6 +211,8 @@ public partial class MainWindow : Window
         BlockedAppsBox.Text = string.Join(Environment.NewLine, s.BlockedApps);
         BlockedSitesBox.Text = string.Join(Environment.NewLine, s.BlockedSites);
         NeverScreenshotBox.IsChecked = s.ScreenCapture == VoxStride.Core.Policy.ScreenCapturePolicy.Never;
+        UseMyBrowserBox.IsChecked = s.UseMyBrowser;
+        RefreshExtensionStatus();
         MicConsentBox.IsChecked = s.MicrophoneConsent; RetainBox.IsChecked = s.RetainTranscripts; StartupBox.IsChecked = s.LaunchAtLogon; LogTextBox.IsChecked = s.LogConversationText;
         _app.RefreshProviderLabel();
     }
@@ -445,6 +447,29 @@ public partial class MainWindow : Window
     }
 
     // ---------- Privacy ----------
+    private void RefreshExtensionStatus()
+    {
+        var ext = _app.Host!.Extension;
+        ExtensionStatus.Text = ext.Connected ? $"● Connected ({ext.BrowserVersion})" : "○ Extension not connected";
+    }
+
+    private void SetupExtension_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = Path.Combine(AppContext.BaseDirectory, "browser-extension");
+        Log.Info("ui", "browser extension setup opened");
+        if (Directory.Exists(folder))
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
+        MessageBox.Show(this,
+            "To connect VoxStride to your own browser:\n\n" +
+            "1. In Edge open edge://extensions (in Chrome: chrome://extensions).\n" +
+            "2. Turn on \"Developer mode\".\n" +
+            "3. Click \"Load unpacked\" and choose the folder that just opened:\n   " + folder + "\n" +
+            "4. Click the VoxStride button in the toolbar on a site and choose \"Allow on this site\".\n\n" +
+            "VoxStride only works on sites you allow, only in the current tab, and never reads passwords or cookies.",
+            "Set up the VoxStride browser extension", MessageBoxButton.OK, MessageBoxImage.Information);
+        RefreshExtensionStatus();
+    }
+
     private static List<string> Lines(string text) =>
         text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
@@ -483,6 +508,7 @@ public partial class MainWindow : Window
         s.BlockedApps = Lines(BlockedAppsBox.Text);
         s.BlockedSites = Lines(BlockedSitesBox.Text).Select(VoxStride.Core.Policy.UserPermissions.Normalize).Where(x => x.Length > 0).Distinct().ToList();
         s.ScreenCapture = NeverScreenshotBox.IsChecked == true ? VoxStride.Core.Policy.ScreenCapturePolicy.Never : VoxStride.Core.Policy.ScreenCapturePolicy.AskEachTime;
+        s.UseMyBrowser = UseMyBrowserBox.IsChecked == true;
         s.Save();
         _app.Host!.Store.RetainTranscripts = s.RetainTranscripts;
         _app.Host.ApplyStartup(s.LaunchAtLogon);

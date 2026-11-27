@@ -9,6 +9,10 @@
     <PackageReference Include="Microsoft.Playwright" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Same file ships in /extension (a test asserts they are identical). -->
+    <EmbeddedResource Include="Scripts\voxstride-page.js" LogicalName="voxstride-page.js" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\VoxStride.Core\VoxStride.Core.csproj" />
   </ItemGroup>
 </Project>
