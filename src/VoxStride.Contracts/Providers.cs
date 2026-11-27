@@ -42,6 +42,11 @@ public interface IProviderConversation
 {
     void AddUserText(string text);
     void AddToolResults(IReadOnlyList<ToolCallOutput> outputs);
+    /// <summary>
+    /// Adds a PNG (a window screenshot from the vision fallback) to the next user turn, with a caption. Images are
+    /// untrusted observations, never instructions. Default: a text note for providers without image input.
+    /// </summary>
+    void AddUserImage(byte[] png, string caption) => AddUserText("[An image was captured but this provider can't receive images.] " + caption);
     IAsyncEnumerable<ProviderEvent> StreamAsync(CancellationToken ct);
 }
 

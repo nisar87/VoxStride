@@ -1,10 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Native Windows integrations via P/Invoke only (no NuGet dependencies). -->
+  <!-- Native Windows integrations: P/Invoke and in-box UI Automation (no NuGet dependencies). -->
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <RootNamespace>VoxStride.Windows</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- WPF framework reference provides the managed UI Automation client (System.Windows.Automation). -->
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\VoxStride.Core\VoxStride.Core.csproj" />

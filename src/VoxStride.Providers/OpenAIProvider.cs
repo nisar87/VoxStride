@@ -42,6 +42,15 @@ public sealed class OpenAIProvider(ProviderSettings settings, HttpMessageHandler
         public void AddUserText(string text) =>
             _input.Add(new JsonObject { ["type"] = "message", ["role"] = "user", ["content"] = new JsonArray(new JsonObject { ["type"] = "input_text", ["text"] = text }) });
 
+        public void AddUserImage(byte[] png, string caption) =>
+            _input.Add(new JsonObject
+            {
+                ["type"] = "message", ["role"] = "user",
+                ["content"] = new JsonArray(
+                    new JsonObject { ["type"] = "input_image", ["image_url"] = "data:image/png;base64," + Convert.ToBase64String(png) },
+                    new JsonObject { ["type"] = "input_text", ["text"] = caption }),
+            });
+
         public void AddToolResults(IReadOnlyList<ToolCallOutput> outputs)
         {
             foreach (var o in outputs)

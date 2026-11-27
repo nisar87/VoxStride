@@ -43,6 +43,17 @@ public sealed class ClaudeProvider(ProviderSettings settings, HttpMessageHandler
 
         public void AddUserText(string text) => _messages.Add(new JsonObject { ["role"] = "user", ["content"] = text });
 
+        public void AddUserImage(byte[] png, string caption)
+        {
+            var blocks = new JsonArray(
+                new JsonObject { ["type"] = "image", ["source"] = new JsonObject { ["type"] = "base64", ["media_type"] = "image/png", ["data"] = Convert.ToBase64String(png) } },
+                new JsonObject { ["type"] = "text", ["text"] = caption });
+            // Append to the preceding user turn (the tool results) so user/assistant turns keep alternating.
+            if (_messages.Count > 0 && _messages[^1] is JsonObject last && last["role"]?.GetValue<string>() == "user" && last["content"] is JsonArray content)
+                foreach (var b in blocks.ToList()) { blocks.Remove(b); content.Add(b); }
+            else _messages.Add(new JsonObject { ["role"] = "user", ["content"] = blocks });
+        }
+
         public void AddToolResults(IReadOnlyList<ToolCallOutput> outputs)
         {
             var content = new JsonArray();

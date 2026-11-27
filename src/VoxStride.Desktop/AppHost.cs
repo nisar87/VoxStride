@@ -114,6 +114,9 @@ public sealed class AppHost : IAsyncDisposable
     public FileScope Scope { get; }
     /// <summary>The user's blocked apps/sites and screen-capture choice (Settings › Permissions).</summary>
     public UserPermissions Permissions { get; }
+    public WindowsUiAutomation UiAutomation { get; }
+    /// <summary>UI Automation tools' shared state (recent observations/screenshots).</summary>
+    public UiSession Ui { get; }
     public IUserApproval Approvals { get; }
 
     public AppHost(AppSettings settings, IUserApproval approvals, bool enableSpeech)
@@ -129,6 +132,8 @@ public sealed class AppHost : IAsyncDisposable
         var controller = new WindowsAppController();
 
         Permissions = new UserPermissions(() => settings.BlockedApps, () => settings.BlockedSites, () => settings.ScreenCapture);
+        UiAutomation = new WindowsUiAutomation();
+        Ui = new UiSession(UiAutomation, Permissions);
         Scope = new FileScope(new WindowsKnownFolders(), () => settings.AllowedFolders,
             () => settings.DisabledKnownFolders.Select(n => Enum.TryParse<KnownFolder>(n, true, out var k) ? (KnownFolder?)k : null).OfType<KnownFolder>().ToList());
         Registry
@@ -139,6 +144,8 @@ public sealed class AppHost : IAsyncDisposable
             .Add(new PreviewTempCleanupTool(FileServices)).Add(new ApplyTempCleanupTool(FileServices))
             .Add(new LaunchAppTool(Apps, controller, Permissions)).Add(new ListAppsTool(Apps))
             .Add(new EditorWriteTool(new WindowsEditorAdapter(Apps), Apps))
+            .Add(new ListWindowsTool(Ui)).Add(new FocusWindowTool(Ui)).Add(new ObserveUiTool(Ui)).Add(new InvokeUiTool(Ui))
+            .Add(new SetValueUiTool(Ui)).Add(new TypeTextUiTool(Ui)).Add(new CaptureWindowTool(Ui)).Add(new ClickUiTool(Ui))
             .Add(new BrowserOpenUrlTool(Browser, Permissions)).Add(new YouTubePlayTool(Browser)).Add(new ChatGptDraftTool(Browser));
 
         Broker = new ToolBroker(Registry, Authority, Store, approvals, Rules, Events, time);
@@ -412,6 +419,7 @@ public sealed class AppHost : IAsyncDisposable
         await Recognizer.DisposeAsync();
         Microphone.Dispose();
         await Browser.DisposeAsync();
+        UiAutomation.Dispose();
         Speech?.Dispose();
         Store.Dispose();
     }

@@ -43,6 +43,16 @@ public sealed class GeminiProvider(ProviderSettings settings, HttpMessageHandler
         public void AddUserText(string text) =>
             _contents.Add(new JsonObject { ["role"] = "user", ["parts"] = new JsonArray(new JsonObject { ["text"] = text }) });
 
+        public void AddUserImage(byte[] png, string caption)
+        {
+            var parts = new JsonArray(
+                new JsonObject { ["inline_data"] = new JsonObject { ["mime_type"] = "image/png", ["data"] = Convert.ToBase64String(png) } },
+                new JsonObject { ["text"] = caption });
+            if (_contents.Count > 0 && _contents[^1] is JsonObject last && last["role"]?.GetValue<string>() == "user" && last["parts"] is JsonArray existing)
+                foreach (var p in parts.ToList()) { parts.Remove(p); existing.Add(p); }
+            else _contents.Add(new JsonObject { ["role"] = "user", ["parts"] = parts });
+        }
+
         public void AddToolResults(IReadOnlyList<ToolCallOutput> outputs)
         {
             var parts = new JsonArray();
