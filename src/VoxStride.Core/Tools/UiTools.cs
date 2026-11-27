@@ -190,7 +190,7 @@ public sealed class InvokeUiTool(UiSession session) : UiToolBase(session)
         "Press a button, tick a checkbox, select an item, expand/collapse a menu, or focus a control, by element id from the latest ui_observe of that window. Buttons like Send, Delete, Pay or Submit need the user's on-screen approval.",
         Schema.Object(
             ("windowId", Schema.Str("windowId", "^w[0-9a-f]{1,16}-[0-9]{1,10}$", 40), true),
-            ("elementId", Schema.Str("Element id from ui_observe", "^e[0-9]{1,4}$", 6), true),
+            ("elementId", Schema.Str("Element id from ui_observe", "^e[0-9]{1,6}$", 8), true),
             ("action", Schema.Str("What to do (default invoke)", null, 10, ActionNames), false)),
         RiskTier.LowReversible, true);
 
@@ -230,7 +230,7 @@ public sealed class SetValueUiTool(UiSession session) : UiToolBase(session)
         "Set the text of a text box (replacing its content) by element id from the latest ui_observe. Not for password fields. Verified by reading the value back.",
         Schema.Object(
             ("windowId", Schema.Str("windowId", "^w[0-9a-f]{1,16}-[0-9]{1,10}$", 40), true),
-            ("elementId", Schema.Str("Element id from ui_observe", "^e[0-9]{1,4}$", 6), true),
+            ("elementId", Schema.Str("Element id from ui_observe", "^e[0-9]{1,6}$", 8), true),
             ("text", Schema.Str("The new text", null, MaxChars), true)),
         RiskTier.LowReversible, true);
 
@@ -265,7 +265,7 @@ public sealed class TypeTextUiTool(UiSession session) : UiToolBase(session)
         "Type text at a control (it gets keyboard focus first) for controls that don't accept ui_set_value. Typing stops if the user switches windows. Not for password fields.",
         Schema.Object(
             ("windowId", Schema.Str("windowId", "^w[0-9a-f]{1,16}-[0-9]{1,10}$", 40), true),
-            ("elementId", Schema.Str("Element id from ui_observe", "^e[0-9]{1,4}$", 6), true),
+            ("elementId", Schema.Str("Element id from ui_observe", "^e[0-9]{1,6}$", 8), true),
             ("text", Schema.Str("Text to type", null, MaxChars), true)),
         RiskTier.LowReversible, true);
 

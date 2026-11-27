@@ -25,6 +25,7 @@ public sealed class WindowsUiAutomation : IUiAutomation, IDisposable
     public static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(8);
     private readonly ConcurrentDictionary<string, DateTime> _startTimes = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Dictionary<string, AutomationElement>> _elements = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, int> _nextElementNumber = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, (UiNative.RECT Rect, double Scale)> _captures = new(StringComparer.Ordinal);
     private readonly int _ownPid = Environment.ProcessId;
     private Worker _worker = new();
@@ -166,6 +167,8 @@ public sealed class WindowsUiAutomation : IUiAutomation, IDisposable
         var map = new Dictionary<string, AutomationElement>(StringComparer.Ordinal);
         var list = new List<UiElement>();
         var truncated = false;
+        // Element ids are never reused for a window: an id from an older observation can't silently point at a different control.
+        var number = _nextElementNumber.GetOrAdd(w.Id, 1);
         using (cr.Activate())
         {
             var root = AutomationElement.FromHandle((nint)w.Hwnd);
@@ -178,7 +181,7 @@ public sealed class WindowsUiAutomation : IUiAutomation, IDisposable
                 if (list.Count >= max || visited > 3000 || sw.Elapsed > TimeSpan.FromSeconds(6)) { truncated = true; break; }
                 var (el, depth) = queue.Dequeue();
                 visited++;
-                if (depth > 0) TryAdd(el, depth, filter, map, list);
+                if (depth > 0) TryAdd(el, depth, filter, map, list, ref number);
                 if (depth >= 14) continue;
                 AutomationElement? child;
                 try { child = walker.GetFirstChild(el, cr); } catch (ElementNotAvailableException) { continue; }
@@ -190,11 +193,12 @@ public sealed class WindowsUiAutomation : IUiAutomation, IDisposable
             }
         }
         _elements[w.Id] = map;
+        _nextElementNumber[w.Id] = number > 900_000 ? 1 : number;
         Log.Info("ui", $"observe {w.ProcessName} elements={list.Count} truncated={truncated} ms={sw.ElapsedMilliseconds}");
         return new UiSnapshot(w.Id, w.Title, list, truncated, DateTimeOffset.UtcNow);
     }
 
-    private static void TryAdd(AutomationElement el, int depth, string? filter, Dictionary<string, AutomationElement> map, List<UiElement> list)
+    private static void TryAdd(AutomationElement el, int depth, string? filter, Dictionary<string, AutomationElement> map, List<UiElement> list, ref int number)
     {
         try
         {
@@ -222,7 +226,7 @@ public sealed class WindowsUiAutomation : IUiAutomation, IDisposable
             if (c.IsKeyboardFocusable) actions.Add("focus");
             if (name.Length == 0 && actions.Count == 0 && value is null) return; // structural containers add noise
             var r = c.BoundingRectangle;
-            var id = "e" + (list.Count + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var id = "e" + (number++).ToString(System.Globalization.CultureInfo.InvariantCulture);
             map[id] = el;
             list.Add(new UiElement(id, role, name.Length > 120 ? name[..120] + "…" : name, string.IsNullOrEmpty(c.AutomationId) ? null : c.AutomationId, value, c.IsEnabled, c.IsPassword, actions,
                 double.IsInfinity(r.X) ? 0 : (int)r.X, double.IsInfinity(r.Y) ? 0 : (int)r.Y, (int)r.Width, (int)r.Height, depth));

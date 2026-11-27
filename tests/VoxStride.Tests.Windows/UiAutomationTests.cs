@@ -10,6 +10,7 @@ namespace VoxStride.Tests.Windows;
 /// Real UI Automation against the test fixture app (tests/VoxStride.UiFixture) on the Windows desktop session.
 /// Each test writes an "E2E-UI" line so CI logs show what actually ran.
 /// </summary>
+[Collection("Desktop")] // UI tests share one desktop and foreground window: never run them in parallel
 public sealed class UiAutomationTests(ITestOutputHelper output) : IDisposable
 {
     private readonly WindowsUiAutomation _ui = new();
@@ -130,6 +131,7 @@ public sealed class UiAutomationTests(ITestOutputHelper output) : IDisposable
 }
 
 /// <summary>P4 gate: ≥100 attempts per workflow class with ≥95% verified success, and a hung app never hangs VoxStride.</summary>
+[Collection("Desktop")]
 public sealed class UiAutomationGateTests(ITestOutputHelper output) : IDisposable
 {
     private readonly WindowsUiAutomation _ui = new();
@@ -173,7 +175,8 @@ public sealed class UiAutomationGateTests(ITestOutputHelper output) : IDisposabl
                     await Task.Delay(25);
                 }
             }
-            var sub = snap.Elements.First(e => e.Name == "Subscribe");
+            snap = await _ui.ObserveAsync(w.Id, null, 150, CancellationToken.None); // ids from the full observation (the filtered one replaced it)
+            var sub = snap!.Elements.First(e => e.Name == "Subscribe");
             var tog = await _ui.InvokeAsync(w.Id, sub.Id, "toggle", CancellationToken.None);
             if (tog.Ok && tog.Verified) toggleOk++;
         }
@@ -206,4 +209,30 @@ public sealed class UiAutomationGateTests(ITestOutputHelper output) : IDisposabl
         _fixture?.Dispose();
         _ui.Dispose();
     }
+}
+
+[Collection("Desktop")]
+public sealed class UiElementIdTests : IDisposable
+{
+    private readonly WindowsUiAutomation _ui = new();
+    private Process? _p;
+
+    [Fact]
+    public async Task IdsFromAnOlderObservationNeverAliasNewControls()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "VoxStride.sln"))) dir = dir.Parent;
+        var exe = Directory.GetFiles(Path.Combine(dir!.FullName, "tests", "VoxStride.UiFixture", "bin"), "VoxStride.UiFixture.exe", SearchOption.AllDirectories).OrderByDescending(File.GetLastWriteTimeUtc).First();
+        _p = Process.Start(new ProcessStartInfo(exe, "\"Ids " + Guid.NewGuid().ToString("N")[..6] + "\"") { UseShellExecute = false })!;
+        UiWindow? w = null;
+        for (var i = 0; i < 100 && w is null; i++) { await Task.Delay(100); w = (await _ui.ListWindowsAsync(CancellationToken.None)).FirstOrDefault(x => x.ProcessId == _p.Id); }
+        var full = await _ui.ObserveAsync(w!.Id, null, 150, CancellationToken.None);
+        var subscribe = full!.Elements.First(e => e.Name == "Subscribe");
+        var filtered = await _ui.ObserveAsync(w.Id, "Greet", 150, CancellationToken.None);
+        Assert.DoesNotContain(filtered!.Elements, e => e.Id == subscribe.Id);
+        var stale = await _ui.InvokeAsync(w.Id, subscribe.Id, "toggle", CancellationToken.None);
+        Assert.Equal("element_stale", stale.Error); // refused, not applied to whatever control now has that id
+    }
+
+    public void Dispose() { try { if (_p is { HasExited: false }) _p.Kill(); } catch (Exception) { } _p?.Dispose(); _ui.Dispose(); }
 }
