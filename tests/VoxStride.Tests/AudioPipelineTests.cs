@@ -105,6 +105,19 @@ public sealed class PcmPipeStreamTests
     }
 
     [Fact]
+    public async Task AbortDiscardsBufferedAudioAndUnblocksReader()
+    {
+        var pipe = new PcmPipeStream(8192);
+        pipe.Append(Bytes(1000));
+        var read = Task.Run(() => pipe.Read(new byte[4000], 0, 4000));
+        Assert.False(await CompletesWithin(read, 100));
+        pipe.Abort();
+        Assert.True(await CompletesWithin(read, 2000));
+        Assert.Equal(0, await read); // cancelled audio is never handed to the engine
+        Assert.Equal(1000, pipe.DroppedBytes);
+    }
+
+    [Fact]
     public void AppendAfterCompleteIsIgnored()
     {
         var pipe = new PcmPipeStream(4096);

@@ -72,6 +72,18 @@ public sealed class PcmPipeStream : Stream
         lock (_gate) { _completed = true; Monitor.PulseAll(_gate); }
     }
 
+    /// <summary>Ends the stream and discards anything not yet read (used on cancel: nothing more is recognized).</summary>
+    public void Abort()
+    {
+        lock (_gate)
+        {
+            DroppedBytes += _count;
+            _count = 0;
+            _completed = true;
+            Monitor.PulseAll(_gate);
+        }
+    }
+
     public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
 
     public override int Read(Span<byte> buffer)

@@ -123,22 +123,31 @@ public sealed class SpeechPipelineTests(ITestOutputHelper output)
     {
         if (!Prerequisites(out var speech, "testing one two three")) return;
         var mic = new LiveFakeMicrophone(speech);
-        using var hub = new AudioHub(() => mic);
-        var rec = new WindowsSpeechRecognizer("en-US", [], hub);
+        using var hub = new AudioHub(() => mic, output.WriteLine);
+        var rec = new WindowsSpeechRecognizer("en-US", [], hub, output.WriteLine);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        void Step(string what) => output.WriteLine($"E2E-SPEECH: {clock.ElapsedMilliseconds} ms — {what}");
         try
         {
             await rec.StartAsync(Guid.NewGuid(), CancellationToken.None);
             Assert.True(hub.IsOpen);
-            await Task.Delay(500);
+            await Task.Delay(1500); // mid-speech
+            Step("cancelling while speech is arriving");
             await rec.StopAsync(TimeSpan.Zero, CancellationToken.None); // cancel
+            Step("cancelled");
             Assert.False(hub.IsOpen);
             await rec.StartAsync(Guid.NewGuid(), CancellationToken.None); // restarts cleanly after a cancel
+            Step("restarted");
             Assert.True(hub.IsOpen);
+            await Task.Delay(500);
             await rec.StopAsync(TimeSpan.Zero, CancellationToken.None);
+            Step("cancelled again");
             Assert.False(hub.IsOpen);
-            output.WriteLine("E2E-SPEECH: ran — cancel/restart lifecycle");
         }
         finally { await rec.DisposeAsync(); }
+        Step("disposed");
+        // A cancel must be near-instant; a hang here would freeze Talk/Stop for the user.
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), $"cancel/restart/dispose took {clock.Elapsed.TotalSeconds:0.0} s");
     }
 
     [Fact]

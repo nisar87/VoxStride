@@ -211,7 +211,7 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer, ISpeechDiagnost
     {
         if (Interlocked.Exchange(ref run.CleanedUp, 1) != 0) return;
         run.Watchdog?.Dispose();
-        run.Pipe.Complete();
+        run.Pipe.Complete(); // idempotent; unblocks any pending engine read
         _log?.Invoke($"speech-session engine=offline reason={reason} device=\"{run.Lease.DeviceLabel}\" ms={(long)run.Lease.Elapsed.TotalMilliseconds} buffers={run.Lease.Buffers} peak={run.Lease.Peak:0} dropped={run.Pipe.DroppedBytes} hypotheses={run.Hypotheses} finals={run.Finals} rejected={run.Rejected}");
         run.Lease.Dispose();
     }
@@ -243,8 +243,14 @@ public sealed class WindowsSpeechRecognizer : ISpeechRecognizer, ISpeechDiagnost
         }
         run.Watchdog?.Dispose();
         run.Lease.Data -= run.Pipe.Append; // no new audio after the user finished
-        if (flushTimeout <= TimeSpan.Zero) { try { engine?.RecognizeAsyncCancel(); } catch (Exception) { } }
-        run.Pipe.Complete(); // end of audio → the engine finalizes the last phrase from what it has, then completes
+        // Always end the stream BEFORE any engine call: the engine may wait for its current read to return, and
+        // that read would otherwise block forever waiting for audio that will never come.
+        if (flushTimeout <= TimeSpan.Zero)
+        {
+            run.Pipe.Abort(); // cancel: discard buffered audio so nothing more is recognized
+            try { engine?.RecognizeAsyncCancel(); } catch (Exception) { }
+        }
+        else run.Pipe.Complete(); // finish: the engine finalizes the last phrase from what it has, then completes
         var wait = flushTimeout <= TimeSpan.Zero ? TimeSpan.FromMilliseconds(500) : flushTimeout;
         try { await Task.WhenAny(run.Done.Task, Task.Delay(wait, ct)).ConfigureAwait(false); } catch (OperationCanceledException) { }
         if (!run.Done.Task.IsCompleted)
