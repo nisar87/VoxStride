@@ -145,7 +145,16 @@ public sealed class NaturalSpeechSynthesizer(WindowsSpeechSynthesizer local, ICl
     public bool CuesEnabled { get => local.CuesEnabled; set => local.CuesEnabled = value; }
     public bool IsSpeaking => local.IsSpeaking || _playing != 0;
 
+    /// <summary>When the last spoken reply ended (used to ignore room echo of VoxStride's own voice).</summary>
+    public DateTimeOffset LastSpeechEnded { get; private set; } = DateTimeOffset.MinValue;
+
     public async Task SpeakAsync(string text, CancellationToken ct)
+    {
+        try { await SpeakCoreAsync(text, ct).ConfigureAwait(false); }
+        finally { LastSpeechEnded = DateTimeOffset.UtcNow; }
+    }
+
+    private async Task SpeakCoreAsync(string text, CancellationToken ct)
     {
         if (!local.Enabled || string.IsNullOrWhiteSpace(text)) return;
         StopSpeaking();

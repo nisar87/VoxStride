@@ -159,6 +159,7 @@ public sealed class AppHost : IAsyncDisposable
             Language = settings.SpeechCulture,
             FinalizeFlushTimeout = cloudSpeech ? TimeSpan.FromSeconds(8) : TimeSpan.FromMilliseconds(1500),
             SelectedProvider = () => settings.ActiveProvider?.ToString(),
+            NaturalTurnPause = settings.NaturalMode ? TimeSpan.FromSeconds(Math.Clamp(settings.NaturalPauseSeconds, 0.8, 5)) : null,
         }, time);
     }
 
@@ -330,6 +331,13 @@ public sealed class AppHost : IAsyncDisposable
         w.TrailingText += t => trailing = t;
         w.WakeDetected += detectedAt =>
         {
+            // VoxStride's own voice (or a cue) must never wake it.
+            if (Speech is { } sp && (sp.IsSpeaking || DateTimeOffset.UtcNow - sp.LastSpeechEnded < TimeSpan.FromMilliseconds(700)))
+            {
+                Log.Info("wake", "wake phrase ignored: VoxStride itself was speaking");
+                return;
+            }
+            var handover = Microphone.Position;
             // TrailingText is raised right after WakeDetected for the same utterance; defer one tick to collect it.
             _ = Task.Run(async () =>
             {
@@ -339,6 +347,7 @@ public sealed class AppHost : IAsyncDisposable
                 // instead of closing and reopening it (which loses the first words).
                 Log.Info("wake", "wake phrase detected; handing the microphone to dictation" + (text is null ? "" : " trailing=" + Log.Text(text)));
                 var bridge = Microphone.Acquire("handoff");
+                Microphone.ArmReplay(handover, TimeSpan.FromSeconds(3)); // words spoken during the hand-over are replayed into dictation
                 await w.StopAsync();
                 Conversation.ActivateFromWake(text);
                 await Task.Delay(2000);

@@ -100,6 +100,7 @@ public partial class MainWindow : Window
     }
 
     private void Talk_Click(object sender, RoutedEventArgs e) { Log.Info("ui", "Talk button"); _app.TalkOrProceed(); }
+    private void Pause_Click(object sender, RoutedEventArgs e) { Log.Info("ui", "Pause button"); _app.TogglePause(); }
     private void Stop_Click(object sender, RoutedEventArgs e) { Log.Info("ui", "Stop button"); _app.Host?.Conversation.PressCancel(); }
     private void Proceed_Click(object sender, RoutedEventArgs e) { Log.Info("ui", "Proceed button"); _app.Host?.Conversation.PressProceed(); }
 
@@ -162,6 +163,8 @@ public partial class MainWindow : Window
         RunBudgetBox.Text = s.MaxTokensPerRun.ToString(CultureInfo.InvariantCulture);
         MaxStepsBox.Text = s.MaxSteps.ToString(CultureInfo.InvariantCulture);
 
+        foreach (ComboBoxItem item in TalkKeyBox.Items) if ((string)item.Tag == s.TalkKey.ToString()) TalkKeyBox.SelectedItem = item;
+        NaturalBox.IsChecked = s.NaturalMode;
         WakeBox.IsChecked = s.WakeWordEnabled; YieldBox.IsChecked = s.YieldMicToOtherApps; PlainProceedBox.IsChecked = s.AllowPlainProceed; SpeakBox.IsChecked = s.SpeakResults;
         CuesBox.IsChecked = s.AudioCues; OverlayBox.IsChecked = s.ShowOverlay;
         var cultures = SpeechEnvironment.RecognizerCultures().Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -301,7 +304,10 @@ public partial class MainWindow : Window
         s.WakeWordEnabled = WakeBox.IsChecked == true; s.YieldMicToOtherApps = YieldBox.IsChecked == true; s.AllowPlainProceed = PlainProceedBox.IsChecked == true;
         s.SpeakResults = SpeakBox.IsChecked == true; s.AudioCues = CuesBox.IsChecked == true; s.ShowOverlay = OverlayBox.IsChecked == true;
         if (VoiceBox.SelectedItem is string v) s.Voice = v;
-        var engineBefore = (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.SpeechCulture);
+        if (TalkKeyBox.SelectedItem is ComboBoxItem { Tag: string tk }) s.TalkKey = Enum.Parse<TalkKeyMode>(tk);
+        var naturalBefore = s.NaturalMode;
+        s.NaturalMode = NaturalBox.IsChecked == true;
+        var engineBefore = (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.SpeechCulture, naturalBefore);
         var micBefore = s.MicrophoneName;
         s.MicrophoneName = MicBox.SelectedIndex <= 0 ? null : MicBox.SelectedItem as string;
         if (CultureBox.SelectedItem is string c) s.SpeechCulture = c;
@@ -313,7 +319,7 @@ public partial class MainWindow : Window
         s.Save();
         _app.Host!.RefreshVoice();
         if (!string.Equals(micBefore, s.MicrophoneName, StringComparison.Ordinal)) _app.Host.MicrophoneChanged(); // applies immediately
-        if (engineBefore != (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.SpeechCulture))
+        if (engineBefore != (s.CloudSpeechConsent, s.SpeechEngine, s.MicSensitivity, s.SpeechCulture, s.NaturalMode))
         {
             if (MessageBox.Show(this, "The new speech settings take effect after VoxStride restarts. Restart now?", "VoxStride", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             { _app.RestartApp(); return; }

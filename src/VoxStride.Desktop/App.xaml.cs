@@ -278,6 +278,41 @@ public partial class App : Application
         else Host.Conversation.ActivateFromHotkey();
     }
 
+    /// <summary>Pause or resume the running task: nothing new starts while paused; Stop still works.</summary>
+    public void TogglePause()
+    {
+        if (Host is null) return;
+        if (!Host.Runs.TogglePause()) { Log.Info("ui", "pause pressed but no task is running"); _vm.AddActivity("There's no task running to pause."); return; }
+        _vm.AddActivity(Host.Runs.IsPaused ? "Paused. Nothing new will start until you resume (Ctrl+Alt+P). Stop still works." : "Resumed.", Host.Runs.IsPaused ? "⏸" : "▶");
+    }
+
+    private DispatcherTimer? _holdTimer;
+
+    /// <summary>
+    /// Hold-to-talk: listening starts on key-down; releasing Ctrl+Alt+V commits (push-to-talk). A quick tap (under 0.4 s)
+    /// keeps listening, like the toggle mode, so a tap still works.
+    /// </summary>
+    private void StartHoldToTalk()
+    {
+        if (Host is null) return;
+        if (_muted) ToggleMute();
+        var down = DateTime.UtcNow;
+        Log.Info("ui", "hold-to-talk: key down");
+        Host.Conversation.ActivateFromHotkey();
+        _holdTimer?.Stop();
+        _holdTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(40) };
+        _holdTimer.Tick += (_, _) =>
+        {
+            if ((GetAsyncKeyState(0x56) & 0x8000) != 0) return; // V still held
+            _holdTimer!.Stop();
+            var held = DateTime.UtcNow - down;
+            if (held < TimeSpan.FromMilliseconds(400)) { Log.Info("ui", $"hold-to-talk: tap ({held.TotalMilliseconds:0} ms), staying in listening mode"); return; }
+            Log.Info("ui", $"hold-to-talk: released after {held.TotalSeconds:0.0}s, committing");
+            Host.Conversation.PressProceed();
+        };
+        _holdTimer.Start();
+    }
+
     public void ToggleMute()
     {
         if (Host is null) return;
@@ -345,7 +380,7 @@ public partial class App : Application
     }
 
     // ---------- Global hotkeys (work without network; stop is always available) ----------
-    private const int HK_TALK = 1, HK_STOP = 2, HK_MUTE = 3;
+    private const int HK_TALK = 1, HK_STOP = 2, HK_MUTE = 3, HK_PAUSE = 4;
     private const uint MOD_ALT = 0x1, MOD_CONTROL = 0x2, MOD_NOREPEAT = 0x4000;
 
     private void RegisterHotkeys()
@@ -355,9 +390,10 @@ public partial class App : Application
         _hotkeySink.AddHook(HotkeyHook);
         var ok = RegisterHotKey(_hotkeySink.Handle, HK_TALK, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x56 /* V */)
                & RegisterHotKey(_hotkeySink.Handle, HK_STOP, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x58 /* X */)
-               & RegisterHotKey(_hotkeySink.Handle, HK_MUTE, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x4D /* M */);
+               & RegisterHotKey(_hotkeySink.Handle, HK_MUTE, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x4D /* M */)
+               & RegisterHotKey(_hotkeySink.Handle, HK_PAUSE, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x50 /* P */);
         if (!ok) { Log.Warn("hotkey", $"some global shortcuts could not be registered (win32 error {Marshal.GetLastWin32Error()}); another app may own them"); _vm.AddActivity("Some global shortcuts are used by another app. The tray menu and buttons still work.", "!"); }
-        else Log.Info("hotkey", "shortcuts registered: Ctrl+Alt+V talk, Ctrl+Alt+X stop, Ctrl+Alt+M mute");
+        else Log.Info("hotkey", "shortcuts registered: Ctrl+Alt+V talk ({Settings.TalkKey}), Ctrl+Alt+X stop, Ctrl+Alt+M mute, Ctrl+Alt+P pause");
     }
 
     private void UnregisterHotkeys()
@@ -365,7 +401,7 @@ public partial class App : Application
         if (_hotkeySink is null) return;
         var sink = _hotkeySink;
         _hotkeySink = null;
-        UnregisterHotKey(sink.Handle, HK_TALK); UnregisterHotKey(sink.Handle, HK_STOP); UnregisterHotKey(sink.Handle, HK_MUTE);
+        UnregisterHotKey(sink.Handle, HK_TALK); UnregisterHotKey(sink.Handle, HK_STOP); UnregisterHotKey(sink.Handle, HK_MUTE); UnregisterHotKey(sink.Handle, HK_PAUSE);
         sink.Dispose();
     }
 
@@ -373,10 +409,11 @@ public partial class App : Application
     {
         if (msg != 0x0312 /* WM_HOTKEY */) return IntPtr.Zero;
         handled = true;
-        Log.Info("hotkey", wParam.ToInt32() switch { HK_TALK => "Ctrl+Alt+V (talk)", HK_STOP => "Ctrl+Alt+X (stop)", HK_MUTE => "Ctrl+Alt+M (mute)", _ => "unknown" } + " pressed");
+        Log.Info("hotkey", wParam.ToInt32() switch { HK_TALK => "Ctrl+Alt+V (talk)", HK_STOP => "Ctrl+Alt+X (stop)", HK_MUTE => "Ctrl+Alt+M (mute)", HK_PAUSE => "Ctrl+Alt+P (pause)", _ => "unknown" } + " pressed");
         switch (wParam.ToInt32())
         {
-            case HK_TALK: TalkOrProceed(); break;
+            case HK_TALK: if (Settings.TalkKey == TalkKeyMode.Hold && !_vm.IsListening) StartHoldToTalk(); else TalkOrProceed(); break;
+            case HK_PAUSE: TogglePause(); break;
             case HK_STOP: Host?.Conversation.PressCancel(); break;
             case HK_MUTE: ToggleMute(); break;
         }
@@ -405,4 +442,5 @@ public partial class App : Application
 
     [DllImport("user32.dll", SetLastError = true)] private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vKey);
 }

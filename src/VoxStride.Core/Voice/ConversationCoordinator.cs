@@ -22,6 +22,12 @@ public sealed class CoordinatorOptions
     public TimeSpan FollowUpWindow { get; init; } = TimeSpan.FromSeconds(90);
     public string Language { get; init; } = "en-US";
     public Func<string?> SelectedProvider { get; init; } = () => null;
+    /// <summary>
+    /// Opt-in natural mode: a pause this long after the last final words ends the turn. Such a turn is committed as
+    /// <see cref="InputMode.VoiceNatural"/>, which may only read and answer — any change to the PC still needs
+    /// "VoxStride, execute" or Proceed. Null (default) = off: only an explicit finish commits.
+    /// </summary>
+    public TimeSpan? NaturalTurnPause { get; init; }
 }
 
 /// <summary>
@@ -164,6 +170,7 @@ public sealed class ConversationCoordinator : IAsyncDisposable
                 LogTranscript(t.Event);
                 if (_buffer is null || t.Event.SessionId != _buffer.SessionId) { Log.Debug("voice", $"transcript dropped: stale session seg={t.Event.SegmentId}"); break; } // stale session
                 if (State is not (AgentState.Listening or AgentState.Clarifying or AgentState.Finalizing)) { Log.Debug("voice", $"transcript dropped: state {State}"); break; }
+                if (t.Event.IsFinal && _speech?.IsSpeaking == true) { Log.Info("voice", $"final ignored: VoxStride was speaking (own voice) seg={t.Event.SegmentId}"); break; }
                 if (!_buffer.Apply(t.Event)) { Log.Debug("voice", $"transcript dropped by buffer seg={t.Event.SegmentId} rev={t.Event.Revision} (out of order or duplicate)"); break; }
                 _lastActivity = _time.GetUtcNow(); _reminded = false;
                 if (t.Event.IsFinal && State != AgentState.Finalizing) HandleFinal(t.Event);
@@ -182,6 +189,7 @@ public sealed class ConversationCoordinator : IAsyncDisposable
                 Log.Info("voice", $"input proceed state={State}");
                 if (State is AgentState.Listening or AgentState.Clarifying)
                 {
+                    _naturalTurn = false;
                     AwaitingExecuteConfirmation = false;
                     BeginFinalize(null);
                 }
@@ -209,6 +217,14 @@ public sealed class ConversationCoordinator : IAsyncDisposable
                 if (State is AgentState.Listening or AgentState.Clarifying)
                 {
                     var idle = _time.GetUtcNow() - _lastActivity;
+                    if (_options.NaturalTurnPause is { } pause && idle >= pause && !AwaitingExecuteConfirmation && _buffer is not null && _buffer.PendingCount == 0
+                        && !string.IsNullOrWhiteSpace(_buffer.FinalText()))
+                    {
+                        Log.Info("voice", $"natural mode: end of turn after {idle.TotalSeconds:0.0}s pause (read-only turn)");
+                        _naturalTurn = true;
+                        BeginFinalize(null);
+                        break;
+                    }
                     if (idle >= _options.InactivityDiscard) await DiscardAsync("No instruction was finished, so I discarded the draft. Nothing was done.", $"inactive {idle.TotalSeconds:0}s");
                     else if (idle >= _options.InactivityReminder && !_reminded)
                     {
@@ -230,6 +246,14 @@ public sealed class ConversationCoordinator : IAsyncDisposable
                     await RestartRecognizerAsync();
                     break;
                 }
+                if (string.IsNullOrWhiteSpace(text) && !_naturalTurn && _lastNatural is { } ln && _time.GetUtcNow() - ln.At < _options.FollowUpWindow)
+                {
+                    // "VoxStride, execute" on its own confirms the request from the previous natural-mode turn.
+                    Log.Info("voice", "explicit finish with no new words: confirming the previous natural-mode request");
+                    _lastNatural = null;
+                    Commit(ln.Text, InputMode.Voice, _buffer.SessionId);
+                    break;
+                }
                 if (string.IsNullOrWhiteSpace(text))
                 {
                     SetState(AgentState.Clarifying, "no words captured");
@@ -237,7 +261,7 @@ public sealed class ConversationCoordinator : IAsyncDisposable
                     await RestartRecognizerAsync();
                     break;
                 }
-                Commit(text, InputMode.Voice, _buffer.SessionId);
+                Commit(text, _naturalTurn ? InputMode.VoiceNatural : InputMode.Voice, _buffer.SessionId);
                 break;
 
             case RunDone r:
@@ -269,6 +293,7 @@ public sealed class ConversationCoordinator : IAsyncDisposable
                 if (AwaitingExecuteConfirmation) { AwaitingExecuteConfirmation = false; SetState(AgentState.Listening, "kept talking"); }
                 break;
             case ControlKind.Finish:
+                _naturalTurn = false;
                 _buffer!.MarkControl(e.SegmentId, c.Content);
                 AwaitingExecuteConfirmation = false;
                 BeginFinalize(string.IsNullOrWhiteSpace(c.Content) ? e.StartMs : e.StartMs + 1);
@@ -299,6 +324,7 @@ public sealed class ConversationCoordinator : IAsyncDisposable
 
     private async Task StartListeningAsync(string source)
     {
+        _naturalTurn = false;
         var session = Guid.NewGuid();
         _buffer = new CommandBuffer(session);
         _finishStartMs = null;
@@ -331,6 +357,9 @@ public sealed class ConversationCoordinator : IAsyncDisposable
         catch (Exception ex) { Log.Error("voice", "recognizer failed to restart", ex); Notice?.Invoke("Speech input unavailable: " + ex.Message); }
     }
 
+    private bool _naturalTurn;
+    private (string Text, DateTimeOffset At)? _lastNatural;
+
     private void BeginFinalize(long? finishStartMs)
     {
         _finishStartMs = finishStartMs;
@@ -349,6 +378,7 @@ public sealed class ConversationCoordinator : IAsyncDisposable
     private void Commit(string text, InputMode mode, Guid sessionId)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
+        _lastNatural = mode == InputMode.VoiceNatural ? (text, _time.GetUtcNow()) : null;
         var withinFollowUp = _time.GetUtcNow() - _lastRunEnd < _options.FollowUpWindow;
         var envelope = new CommandEnvelope(sessionId, Guid.NewGuid(), text, RunAuthority.HashTranscript(text), _options.Language,
             withinFollowUp ? [.. _context.TakeLast(4)] : [], _time.GetUtcNow(), mode, _options.SelectedProvider(), null);

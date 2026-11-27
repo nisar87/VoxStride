@@ -63,7 +63,31 @@ public sealed class RunAuthority(TimeProvider time)
         return AuthorizationStatus.Valid;
     }
 
-    public void Revoke(Guid runId) => _active.TryRemove(runId, out _);
+    public void Revoke(Guid runId)
+    {
+        _active.TryRemove(runId, out _);
+        if (_paused.TryRemove(runId, out var gate)) gate.Set(); // a paused run that is stopped must wake up and see the revocation
+    }
+
+    private readonly ConcurrentDictionary<Guid, ManualResetEventSlim> _paused = new();
+
+    /// <summary>Pause: no new side effect of this run starts until <see cref="Resume"/> (or the run is revoked).</summary>
+    public bool Pause(Guid runId)
+    {
+        if (!_active.ContainsKey(runId)) return false;
+        _paused.GetOrAdd(runId, _ => new ManualResetEventSlim(true)).Reset();
+        return true;
+    }
+
+    public void Resume(Guid runId) { if (_paused.TryRemove(runId, out var gate)) gate.Set(); }
+
+    public bool IsPaused(Guid runId) => _paused.TryGetValue(runId, out var g) && !g.IsSet;
+
+    /// <summary>Blocks the calling write while the run is paused.</summary>
+    public void WaitWhilePaused(Guid runId, CancellationToken ct)
+    {
+        if (_paused.TryGetValue(runId, out var gate) && !gate.IsSet) gate.Wait(ct);
+    }
 
     public void RevokeAll()
     {

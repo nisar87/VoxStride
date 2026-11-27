@@ -79,6 +79,29 @@ public sealed class RunCoordinator(
         """;
 
 
+    /// <summary>Pauses or resumes the active run. While paused no new side effect starts; Stop still works.</summary>
+    public bool TogglePause()
+    {
+        RunAuthorization? auth;
+        lock (_gate) auth = _activeAuth;
+        if (auth is null) return false;
+        var tag = auth.RunId.ToString("N")[..8];
+        if (authority.IsPaused(auth.RunId))
+        {
+            authority.Resume(auth.RunId);
+            Log.Info("run", $"run {tag} resumed");
+            events.Publish(auth.RunId, AgentState.Executing, "resumed", "Resuming.", canCancel: true);
+        }
+        else if (authority.Pause(auth.RunId))
+        {
+            Log.Info("run", $"run {tag} paused");
+            events.Publish(auth.RunId, AgentState.Paused, "paused", "Paused. Nothing new will start until you resume. Stop still works.", canCancel: true);
+        }
+        return true;
+    }
+
+    public bool IsPaused { get { lock (_gate) return _activeAuth is { } a && authority.IsPaused(a.RunId); } }
+
     public async Task CancelActiveAsync(string reason)
     {
         CancellationTokenSource? cts;
@@ -105,6 +128,14 @@ public sealed class RunCoordinator(
         lat.Mark("t_route");
         var provider = route.Kind == RouteKind.Cloud ? providers.Current() : null;
         var allowed = route.Kind == RouteKind.Direct ? ToolsFor(route.Recipes) : registry.Definitions.Select(d => d.Name).ToList();
+        var readOnly = command.InputMode == InputMode.VoiceNatural;
+        if (readOnly)
+        {
+            // A turn ended by a pause (natural mode) was never explicitly committed: it may read and answer, never change anything.
+            allowed = allowed.Where(n => registry.TryGet(n, out var t) && !t.Definition.Mutates).ToList();
+            if (route.Kind == RouteKind.Direct && route.Recipes.Any(r => ToolsFor([r]).Any(n => registry.TryGet(n, out var t) && t.Definition.Mutates)))
+                route = RouteDecision.Clarify("Ready to do that? Say \"VoxStride, execute\" or press Proceed, and I'll go ahead.");
+        }
         var auth = authority.Mint(command, allowed, options.MaxDuration + TimeSpan.FromMinutes(10));
         var runTag = auth.RunId.ToString("N")[..8];
         Log.Info("run", $"run {runTag} start command={command.CommandId.ToString("N")[..8]} mode={command.InputMode} text={Log.Text(command.FinalizedTranscript)}");
@@ -271,6 +302,7 @@ public sealed class RunCoordinator(
     private async Task<ToolResult> Step(RunAuthorization auth, string tool, JsonObject args, List<StepRecord> steps, LatencyRecorder lat, int n, CancellationToken ct, string? callId = null)
     {
         ct.ThrowIfCancellationRequested();
+        while (authority.IsPaused(auth.RunId)) await Task.Delay(150, ct).ConfigureAwait(false); // paused: start nothing new
         var stepId = "s" + n;
         events.Publish(auth.RunId, AgentState.Executing, "step", Describe(tool), stepId);
         var req = new ToolRequest(Guid.Empty, stepId, $"{auth.RunId:N}-{stepId}-{tool}", 1, tool, args, callId);
@@ -319,6 +351,8 @@ public sealed class RunCoordinator(
             foreach (var c in command.ConversationContext) user.AppendLine("  " + c);
             user.AppendLine();
         }
+        if (command.InputMode == InputMode.VoiceNatural)
+            user.AppendLine("This turn ended with a pause, not an explicit go-ahead: you may only read information and answer. If the user asked for a change to their PC, don't attempt it; briefly say what you'd do and ask them to say \"VoxStride, execute\" to confirm.");
         user.Append("Instruction: ").Append(command.FinalizedTranscript);
         conv.AddUserText(user.ToString());
 

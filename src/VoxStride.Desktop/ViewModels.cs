@@ -51,7 +51,7 @@ public sealed class AssistantViewModel : Observable
         {
             if (!Set(ref _state, value)) return;
             if (value == AgentState.Committed) _runStarted = DateTime.Now;
-            Raise(nameof(StateLabel)); Raise(nameof(StateBrush)); Raise(nameof(IsListening)); Raise(nameof(ProceedVisible)); Raise(nameof(IsBusy));
+            Raise(nameof(StateLabel)); Raise(nameof(StateBrush)); Raise(nameof(IsListening)); Raise(nameof(ProceedVisible)); Raise(nameof(IsBusy)); Raise(nameof(PauseVisible));
         }
     }
 
@@ -86,6 +86,7 @@ public sealed class AssistantViewModel : Observable
 
     public bool IsListening => _state is AgentState.Listening or AgentState.Clarifying;
     public Visibility ProceedVisible => IsListening ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility PauseVisible => IsBusy || _state == AgentState.Paused ? Visibility.Visible : Visibility.Collapsed;
     public bool IsBusy => _state is AgentState.Committed or AgentState.Planning or AgentState.Executing or AgentState.Verifying or AgentState.AwaitingApproval;
 
     public string FinalTranscript { get => _final; set { if (Set(ref _final, value)) Raise(nameof(HasTranscript)); } }

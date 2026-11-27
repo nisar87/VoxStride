@@ -89,6 +89,7 @@
                             <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite" />
                             <ProgressBar Height="6" Margin="0,8,0,0" Maximum="100" Value="{Binding Progress}" x:Name="HomeProgress" />
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                                <Button Content="Pause" Style="{StaticResource PlainButton}" Margin="0,0,8,0" Visibility="{Binding PauseVisible}" Click="Pause_Click" ToolTip="Pause or resume the running task (Ctrl+Alt+P)" />
                                 <Button Content="Stop" Style="{StaticResource PlainButton}" Click="Stop_Click" />
                                 <Button Content="Proceed" Style="{StaticResource PrimaryButton}" Margin="8,0,0,0" Visibility="{Binding ProceedVisible}" Click="Proceed_Click" />
                             </StackPanel>
@@ -218,6 +219,14 @@
                     </Border>
                     <CheckBox x:Name="WakeBox" Content="Listen for &quot;Hey VoxStride&quot; (local, on this PC)" Margin="0,4" />
                     <CheckBox x:Name="YieldBox" Content="Release the microphone while Teams, Zoom or another app is using it" Margin="0,4" />
+                    <StackPanel Orientation="Horizontal" Margin="0,4">
+                        <TextBlock Text="Talk key (Ctrl+Alt+V)" VerticalAlignment="Center" Width="150" />
+                        <ComboBox x:Name="TalkKeyBox" Width="300">
+                            <ComboBoxItem Content="Press to start, press again to finish" Tag="Toggle" />
+                            <ComboBoxItem Content="Hold while speaking, release to run" Tag="Hold" />
+                        </ComboBox>
+                    </StackPanel>
+                    <CheckBox x:Name="NaturalBox" Content="Natural mode: a pause ends my turn for questions and lookups (changes still need &quot;VoxStride, execute&quot;)" Margin="0,4" />
                     <CheckBox x:Name="PlainProceedBox" Content="Also accept a standalone &quot;Proceed&quot; to finish (less strict)" Margin="0,4" />
                     <CheckBox x:Name="SpeakBox" Content="Speak results aloud" Margin="0,4" />
                     <CheckBox x:Name="CuesBox" Content="Play short sound cues" Margin="0,4" />

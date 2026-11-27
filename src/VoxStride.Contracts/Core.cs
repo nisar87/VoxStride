@@ -7,7 +7,8 @@ public enum RiskTier { Read = 0, LowReversible = 1, Moderate = 2, High = 3, Proh
 
 public enum ToolOutcome { Success, Partial, Failure, Unknown }
 
-public enum InputMode { Voice, Typed, PushToTalk }
+/// <summary>How a command was committed. <c>VoiceNatural</c> = ended by a pause in opt-in natural mode: read-only/answer only.</summary>
+public enum InputMode { Voice, Typed, PushToTalk, VoiceNatural }
 
 /// <summary>User-visible lifecycle states (spec §14.2).</summary>
 public enum AgentState

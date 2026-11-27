@@ -62,7 +62,11 @@ public sealed class ToolBroker(
         if (tool.Definition.Mutates && !_dispatchedKeys.TryAdd(dedupeKey, 0))
             return await BlockAsync(request, auth, "duplicate", "Duplicate side-effect request was not repeated.", ct);
 
-        var ctx = new ToolContext(auth, journal, events, request.StepId, () => authority.Check(auth) == AuthorizationStatus.Valid);
+        var ctx = new ToolContext(auth, journal, events, request.StepId, () =>
+        {
+            authority.WaitWhilePaused(auth.RunId, ct); // pause holds every write (also each file inside a batch)
+            return authority.Check(auth) == AuthorizationStatus.Valid;
+        });
         ToolValidation validation;
         try { validation = await tool.ValidateAsync(request.Arguments, ctx, ct); }
         catch (OperationCanceledException) { throw; }

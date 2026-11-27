@@ -40,6 +40,7 @@ public partial class OverlayWindow : Window
 
     private void Proceed_Click(object sender, RoutedEventArgs e) { Log.Info("ui", "overlay Proceed"); _app.Host?.Conversation.PressProceed(); }
     private void Cancel_Click(object sender, RoutedEventArgs e) { Log.Info("ui", "overlay Cancel"); _app.Host?.Conversation.PressCancel(); }
+    private void Pause_Click(object sender, RoutedEventArgs e) { Log.Info("ui", "overlay Pause"); _app.TogglePause(); PauseButton.Content = _app.Host?.Runs.IsPaused == true ? "Resume" : "Pause"; }
     private void Mute_Click(object sender, RoutedEventArgs e) { Log.Info("ui", "overlay Mute"); _app.ToggleMute(); }
 
     public void SetMuted(bool muted) => MuteButton.Content = muted ? "Unmute" : "Mute";

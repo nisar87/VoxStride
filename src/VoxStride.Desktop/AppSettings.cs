@@ -12,6 +12,8 @@ namespace VoxStride.Desktop;
 /// (Windows online dictation requires an MSIX-packaged app and can never work in this installer build).</summary>
 public enum SpeechEngine { Auto, Windows, OpenAI, Gemini, WindowsOnline }
 
+public enum TalkKeyMode { Toggle, Hold }
+
 /// <summary>Non-secret user settings (JSON in %LocalAppData%\VoxStride). API keys live in Windows Credential Manager.</summary>
 public sealed class AppSettings
 {
@@ -55,6 +57,11 @@ public sealed class AppSettings
     public int MaxSteps { get; set; } = 30;
     public int MaxRunSeconds { get; set; } = 180;
     public bool ShowOverlay { get; set; } = true;
+    /// <summary>Talk key: Toggle = press to start, press again to finish; Hold = hold Ctrl+Alt+V while speaking, release to run (a quick tap still toggles).</summary>
+    public TalkKeyMode TalkKey { get; set; } = TalkKeyMode.Toggle;
+    /// <summary>Opt-in natural mode: a pause ends the turn, but such turns may only read and answer (changes still need "VoxStride, execute").</summary>
+    public bool NaturalMode { get; set; }
+    public double NaturalPauseSeconds { get; set; } = 1.5;
     /// <summary>Extra folders (absolute paths) the file tools may use, in addition to the default known folders.</summary>
     public List<string> AllowedFolders { get; set; } = [];
     /// <summary>Default known folders the user switched off (e.g. "Pictures").</summary>

@@ -261,6 +261,70 @@ public sealed class AudioHubTests
         Assert.Contains("mic-error: unplugged", log);
     }
 
+    [Fact]
+    public void PrerollReplaysAudioSinceTheHandoverPoint()
+    {
+        FakeDevice? device = null;
+        using var hub = new AudioHub(() => device = new FakeDevice("mic"), prerollBytes: 16000);
+        using var wake = hub.Acquire("wake");
+        device!.Emit(1000, 1600);
+        var handover = hub.Position;                 // wake phrase detected here
+        device.Emit(2000, 1600);                     // user keeps talking during the handover
+        device.Emit(3000, 1600);
+        using var dictation = hub.Acquire("dictation", replayFrom: handover);
+        var got = new List<byte[]>();
+        dictation.Data += got.Add;                   // subscribes after audio already arrived
+        device.Emit(4000, 1600);
+        Assert.Equal(1600 * 3, got.Sum(b => b.Length)); // 2 replayed buffers + 1 live, nothing from before the handover
+        Assert.Equal(4000, Math.Abs(BitConverter.ToInt16(got[^1], 0)));
+    }
+
+    [Fact]
+    public void AudioBeforeTheFirstSubscriberIsNotLost()
+    {
+        FakeDevice? device = null;
+        using var hub = new AudioHub(() => device = new FakeDevice("mic"));
+        using var lease = hub.Acquire("dictation");
+        device!.Emit(1000); device.Emit(1000);
+        var n = 0;
+        lease.Data += _ => n++;
+        device.Emit(1000);
+        Assert.Equal(3, n);
+    }
+
+    [Fact]
+    public async Task StalledDeviceIsReopenedAutomatically()
+    {
+        var devices = new List<FakeDevice>();
+        var log = new List<string>();
+        using var hub = new AudioHub(() => { var d = new FakeDevice("mic" + devices.Count); devices.Add(d); return d; }, m => { lock (log) log.Add(m); }) { StallTimeout = TimeSpan.FromMilliseconds(300) };
+        using var lease = hub.Acquire("dictation");
+        for (var i = 0; i < 40 && hub.Recoveries == 0; i++) await Task.Delay(100); // device never sends audio
+        Assert.True(hub.Recoveries >= 1, "a silent-stalled device must be re-opened");
+        Assert.True(devices[0].Disposed);
+        lock (log) Assert.Contains(log, l => l.StartsWith("mic-stall", StringComparison.Ordinal));
+        devices[^1].Emit(2000);
+        Assert.True(lease.Buffers >= 1); // the lease keeps working on the new device
+    }
+
+    [Fact]
+    public async Task DeviceErrorTriggersRecoveryWithRetries()
+    {
+        var opens = 0;
+        FakeDevice? current = null;
+        using var hub = new AudioHub(() =>
+        {
+            opens++;
+            current = new FakeDevice("mic") { FailToStart = opens is 2 }; // first reopen attempt fails (still unplugged)
+            return current;
+        }) { StallTimeout = TimeSpan.FromMinutes(5) };
+        using var lease = hub.Acquire("dictation");
+        current!.Fail("unplugged");
+        for (var i = 0; i < 60 && hub.Recoveries == 0; i++) await Task.Delay(100);
+        Assert.Equal(1, hub.Recoveries);
+        Assert.True(opens >= 3);
+    }
+
     [Theory]
     [InlineData(0, 0, 7000, MicHealth.NoAudio)]
     [InlineData(120, 5, 7000, MicHealth.Silent)]
