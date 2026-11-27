@@ -10,15 +10,20 @@ namespace VoxStride.Tests.Windows;
 /// <summary>Local fixture web server (127.0.0.1 only). Pages are synthetic; no external sites are contacted.</summary>
 public sealed class FixtureSite : IDisposable
 {
-    private readonly HttpListener _listener = new();
-    public string Base { get; }
+    private HttpListener _listener = new();
+    public string Base { get; private set; } = "";
 
     public FixtureSite()
     {
-        var port = Random.Shared.Next(49200, 49900);
-        Base = $"http://127.0.0.1:{port}/";
-        _listener.Prefixes.Add(Base);
-        _listener.Start();
+        for (var attempt = 0; ; attempt++)
+        {
+            var port = Random.Shared.Next(49200, 60000);
+            Base = $"http://127.0.0.1:{port}/";
+            _listener.Prefixes.Clear();
+            _listener.Prefixes.Add(Base);
+            try { _listener.Start(); break; }
+            catch (HttpListenerException) when (attempt < 20) { _listener.Close(); _listener = new HttpListener(); } // port in use: try another
+        }
         _ = Task.Run(Serve);
     }
 
