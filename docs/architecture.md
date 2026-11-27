@@ -6,7 +6,7 @@ VoxStride is a single per-user process (`VoxStride.exe`, WPF, .NET 10, `asInvoke
 
 ```
                     ┌──────────────── VoxStride.Desktop (WPF) ────────────────┐
- Mic ─► WakeWord ─► │ ConversationCoordinator (single-reader actor)           │
+ Mic ─► AudioHub ─► │ ConversationCoordinator (single-reader actor)           │
  (System.Speech)    │   CommandBuffer ◄── TranscriptEvents ◄── Recognizer     │
  Hotkeys/Tray/UI ─► │   ControlPhraseDetector ─► explicit commit only         │
                     │        │ CommandEnvelope (immutable, hashed)            │
@@ -21,7 +21,7 @@ VoxStride is a single per-user process (`VoxStride.exe`, WPF, .NET 10, `asInvoke
                     │        → approval (ApprovalWindow) → journal intent     │
                     │        → recheck → execute → verify → journal outcome   │
                     │        ▼                                                │
-                    │   Tools: system · files · cleanup · apps · editor · browser
+                    │   Tools: system · files · cleanup · apps · editor · ui · web
                     │        ▼                                                │
                     │   SqliteStore (journal, moves, history, rules, usage)   │
                     │   EventHub ─► Overlay / Main window / TTS               │
@@ -36,9 +36,10 @@ VoxStride is a single per-user process (`VoxStride.exe`, WPF, .NET 10, `asInvoke
 | `VoxStride.Core` | `RunAuthority`, `ToolBroker`, `PathPolicy`, `SchemaValidator`, journal interface, `IntentRouter`, `CommandBuffer`, `ControlPhraseDetector`, `ConversationCoordinator`, `RunCoordinator`, file organizer/cleanup engines, tool implementations | any |
 | `VoxStride.Providers` | Claude Messages, OpenAI Responses and Gemini generateContent adapters over HTTPS/SSE | any |
 | `VoxStride.Persistence` | SQLite store with migrations and constraints | any |
-| `VoxStride.Windows` | P/Invoke: known folders, Credential Manager, Recycle Bin, app catalog/launcher, editor adapter | Windows |
-| `VoxStride.Speech` | System.Speech recognizer, wake-phrase grammar, TTS, earcons | Windows |
-| `VoxStride.Browser` | Playwright controller over installed Edge in a dedicated profile | Windows (Edge) |
+| `VoxStride.Windows` | P/Invoke: known folders, Credential Manager, Recycle Bin, app catalog/launcher, editor adapter, UI Automation worker (`WindowsUiAutomation`), window capture | Windows |
+| `VoxStride.Speech` | `WaveInRecorder` (the one microphone device), System.Speech recognizer and wake grammar fed from `AudioHub`, cloud STT, TTS, earcons | Windows |
+| `VoxStride.Browser` | Playwright controller over installed Edge in a dedicated profile (implements `IWebAutomation`) | Windows (Edge) |
+| `extension/` | MV3 extension for the user's own Chrome/Edge, reached via native messaging → `VoxStride.exe` relay → per-user pipe → `ExtensionBrowser` (`IWebAutomation`) | Chrome/Edge |
 | `VoxStride.Desktop` | Composition root, WPF UI, tray, hotkeys, approvals, smoke test | Windows |
 
 Provider adapters have no OS access. Tools never see provider DTOs. Vendor-native computer-use tools are not enabled.
@@ -71,10 +72,20 @@ See [threat-model.md](security/threat-model.md). Key invariants:
 - File tools resolve their roots only from Windows known folders, never from model text. `PathPolicy` rejects traversal, reparse points, UNC paths, hidden/system items and protected locations, and every path is rechecked immediately before each move.
 - Moves never overwrite. Every move is journaled (intent → moved/failed/unknown) and undoable. Undo never overwrites and skips edited files.
 
-## Browser
+## Audio (ADR-0009)
+One `AudioHub` owns the microphone. The wake detector, recognizers, Test speech and cloud STT take leases, and the device opens on the first lease and closes on the last. A 3 s pre-roll is replayed to the recognizer at the wake hand-over, so the first words aren't lost. Stalls and device errors reopen the device with backoff. `PcmPipeStream` feeds System.Speech with blocking reads (Length = -1) and is aborted before engine cancel, so Stop takes milliseconds. Mute closes the device. VoxStride never changes Windows sound or exclusive-mode settings. While TTS speaks, final transcripts are ignored (own-voice gating; this is not acoustic echo cancellation).
 
-- **Implemented (P5a):** visible Playwright-driven Microsoft Edge in a dedicated profile. YouTube cards are grouped into visual rows with ads and Shorts excluded. If a position is ambiguous, VoxStride returns choices instead of guessing. Playback is verified by video id and `video.paused/currentTime`. ChatGPT is draft-only; Enter is never pressed and nothing is submitted.
-- **Designed, not yet implemented (P5b):** an MV3 extension for the user's existing Chrome/Edge. It would use the `activeTab` permission, a native messaging host restricted to the extension ID, origin, tab and frame validation, and run-token binding, and would never read cookies, storage or credentials.
+## Desktop control (ADR-0010)
+`UiSession` (Core) owns policy: protected processes, blocked apps, password fields, irreversible-name approval, freshness, and per-window element ids that are never reused. `WindowsUiAutomation` runs managed UIA on a dedicated MTA worker with per-call timeouts and replaces the worker if a target hangs. Typing uses SendInput Unicode with a foreground and mouse guard. The vision fallback captures a single window with `PrintWindow`, after per-use approval, and sends it to the provider as an untrusted image. Coordinate clicks always need approval and a visibility check.
+
+## Browser (ADR-0007, ADR-0011)
+Both browser back-ends implement `IWebAutomation` and share `voxstride-page.js`, which tags visible interactive elements, extracts readable text and refuses password fields. `WebSession` picks the user's browser when the extension is connected and *Use my browser* is on; otherwise it uses VoxStride's own Edge window.
+- **VoxStride's Edge window:** Playwright with a dedicated profile. YouTube cards are grouped into visual rows with ads and Shorts excluded, ambiguity returns choices, and playback is verified by video id. ChatGPT is draft-only.
+- **User's own browser:** MV3 extension (`activeTab`, `scripting` and optional per-site host permissions). The native host `com.voxstride.bridge` is limited to the fixed extension id. The relay mode of `VoxStride.exe` forwards to the pipe `VoxStride.Bridge.<user>` (CurrentUserOnly). The app checks the caller origin and protocol version, the extension re-checks the tab origin, and messages are capped at 1 MB.
+- Page content is untrusted. Text that looks like an injected instruction is flagged, and submits or irreversible clicks need approval.
+
+## Natural mode (ADR-0012)
+An opt-in pause-ended turn is `InputMode.VoiceNatural`, and its run is minted without mutating tools. "VoxStride, execute" within 90 s confirms it as an explicit commit.
 
 ## Data
 

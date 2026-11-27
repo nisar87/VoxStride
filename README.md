@@ -6,16 +6,17 @@
 
 - **Nothing runs until you finish.** Pauses, silence and timeouts never execute anything.
 - **Local first.** Drive checks, opening apps, organizing folders, temp cleanup and undo run on your PC with no AI call.
-- **Bring your own AI.** Claude, Gemini and OpenAI are interchangeable for writing, browsing and open-ended tasks.
+- **Bring your own AI.** Claude, Gemini and OpenAI are interchangeable (with an optional backup provider) for writing, browsing, controlling apps and open-ended tasks.
+- **Works in your apps and your browser.** Reads and operates other apps' controls through Windows accessibility, and works in your own Chrome/Edge through the VoxStride extension. Risky buttons and screenshots always ask first.
 - **Safe by construction.** Typed tools only: no shell, scripts or admin rights. File changes show an exact preview and need your click. Moves never overwrite, everything is journaled, and you can say "undo that".
 
 [![CI](https://github.com/nisar87/VoxStride/actions/workflows/ci.yml/badge.svg)](https://github.com/nisar87/VoxStride/actions/workflows/ci.yml)
 
 ## Status
-Working Windows build with a per-user installer. All automated tests pass on Windows and Linux CI. Voice on real microphones and live provider and browser runs still need verification on a physical PC. See **[docs/progress.md](docs/progress.md)** for the audited status.
+Phases P0–P6 of the plan are implemented, with about 340 automated tests passing on Windows and Linux CI. Those tests include real UI Automation, a real Edge browser with the extension, real speech recognition on live audio, and the installed build's latency and idle measurements. The owner's physical microphone, live provider keys, code signing and store listings are still open. See **[docs/progress.md](docs/progress.md)** for the audited status.
 
 ## Get it
-Download the **VoxStride-Setup-x64** artifact from the latest green [CI run](https://github.com/nisar87/VoxStride/actions/workflows/ci.yml). The installer is unsigned for now. See [docs/installation.md](docs/installation.md).
+Download `VoxStride-Setup-<version>-x64.exe` from the latest [release](https://github.com/nisar87/VoxStride/releases/latest). After that, VoxStride updates itself. The installer is unsigned for now; check it against `SHA256SUMS.txt`. See [docs/installation.md](docs/installation.md).
 
 ## Try saying
 - "How much space is left on C?"
@@ -24,6 +25,8 @@ Download the **VoxStride-Setup-x64** artifact from the latest green [CI run](htt
 - "Open Notepad++ and write a short note about today's plan" *(needs a provider key)*
 - "Search YouTube for lofi beats and play the third video in the top row" *(needs a provider key)*
 - "Open ChatGPT and draft a prompt asking for a weekly meal plan" *(drafted, never sent)*
+- "Move the PDFs in Downloads into a folder called Invoices" *(needs a provider key)*
+- "In Calculator, work out 7 times 6" *(needs a provider key)*
 
 ## Documentation
 | | |
@@ -45,3 +48,6 @@ dotnet test VoxStride.sln -c Release
 dotnet run --project src/VoxStride.Desktop
 ```
 Requires Windows 10 2004+/11 x64 and the .NET 10 SDK.
+
+## Licence
+Proprietary, all rights reserved. See [LICENSE](LICENSE) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

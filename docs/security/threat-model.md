@@ -3,7 +3,7 @@
 Scope: a per-user Windows desktop agent that executes local actions requested by voice, typed text or a cloud model. Method: STRIDE over trust boundaries. Each mitigation links to the test that enforces it.
 
 ## Assets
-User files (Desktop/Documents/Downloads), temp files, API keys, browser sessions in the VoxStride profile, history/journal, the microphone stream.
+User files in allowed folders, temp files, API keys, browser sessions (VoxStride profile and the user's own browser via the extension), other apps' windows and their content, history/journal/diagnostics log, the microphone stream.
 
 ## Trust boundaries
 1. Microphone/ambient audio → recognizer (untrusted input; wake/finish phrases are not authentication).
@@ -11,6 +11,8 @@ User files (Desktop/Documents/Downloads), temp files, API keys, browser sessions
 3. Web pages / documents / UI text → observations (untrusted data, never instructions).
 4. Local UI (approval window, hotkeys) → trusted user intent.
 5. Process boundary to other apps (UIPI, elevated windows, secure desktop).
+6. Browser extension ↔ native host relay ↔ per-user named pipe ↔ VoxStride (IPC; the extension's page data is untrusted).
+7. Window screenshots → provider (untrusted image; per-use consent).
 
 ## Threats and mitigations
 
@@ -26,18 +28,26 @@ User files (Desktop/Documents/Downloads), temp files, API keys, browser sessions
 | T8 | Data loss on undo | Undo only unchanged files to vacant locations; conflicts reported | `F04_UndoReportsConflictsAndNeverOverwrites` |
 | T9 | Premature execution from pauses, silence, timeouts | Explicit commit only; 240-trial randomized gate | `CoordinatorTests.Gate_240ScriptedTrials_ZeroPrematureCommits`, `V01_*`, `ReminderAt30sAndDiscardAt120s…` |
 | T10 | Ambient/TTS/video audio says "execute" or approves | Distinctive prefixed finish phrase; quoted/requested/negated → uncertain; approvals are never voice-driven (click only, not default button, 600 ms arming delay) | `V02_*`, `RequestedAsContentOrNegated…`; ApprovalWindow design. Physical playback test **pending** (V06) |
-| T11 | Text typed into the wrong window | No synthetic keystrokes; WM_SETTEXT to exact verified HWND (process id + start time); new empty document only | `NotepadWriteIsVerifiedByReadBack` (Windows CI) |
-| T12 | Prompt injection from web pages | Pages are observations; browser tools return only titles/hrefs/geometry; no submit/upload tools; draft-only ChatGPT | design + `B03` broker tests; live injection fixtures **pending** |
+| T11 | Text typed into the wrong window | Editor adapter: no synthetic keystrokes, WM_SETTEXT to the exact verified HWND (process id + start time), new empty document only; generic UI typing: see T18 | `NotepadWriteIsVerifiedByReadBack` (Windows CI) |
+| T12 | Prompt injection from web pages, UI text or screenshots | Observations are wrapped as untrusted data; injection-looking text is flagged; submits and irreversible clicks/presses need click approval; no upload/download tools; draft-only ChatGPT; natural turns are read-only | `B03`, `WebToolsTests.LooksLikeInjection*`, fixture injection page in `BrowserTests`, `UiToolsTests` |
 | T13 | Secret leakage | Keys in Credential Manager; never in prompts/logs/journal; redaction of key-like argument names; every log line and exception passes `Log.Redact` (Anthropic/OpenAI/Google keys, bearer tokens, key query params, secret fields); HTTP logging records host+path only; secret scan in CI | `BlockedOperationsAreJournaledRedacted`, `Claude_Continuation…DoesNotContain key`, `LogTests.RedactsSecrets`, `HttpLogNeverContainsQueryKeys`, CI secret-scan job |
 | T13a | Personal data in diagnostics | Log is local only, never uploaded; user words/replies only while the Privacy toggle is on (default on, owner request 2026-11-27); standby (wake) audio text never logged; no audio ever | `ContentIsHiddenWhenTheUserTurnsItOff` |
 | T14 | Vulnerable dependencies | `dotnet list package --vulnerable` gate in CI; transitive pins | CI (caught GHSA-2m69-gcr7-jv3q; pinned 2.1.13) |
 | T15 | Privilege escalation / UIPI bypass | `asInvoker` manifest; no elevated helper; elevated targets reported for human handoff | app.manifest; editor adapter refuses hung/inaccessible windows |
 | T16 | Lock screen / sleep while working | Session lock and suspend stop listening and cancel runs; no auto-resume | `V05_LockAndMuteDiscardDraft`; App `SessionSwitch` wiring |
 | T17 | Idle audio upload | Standby uses only local grammar recognition; no network client exists in the voice path | Architecture; provider calls only from `RunCoordinator` after commit |
+| T18 | Wrong-window or covert UI input | Window identity = hwnd+pid+start time; target must be foreground; typing aborts on focus change or mouse movement; coordinate clicks need approval and a `WindowFromPoint` root check; protected processes (UAC, LogonUI, credential UI, VoxStride) and blocked apps are refused; password fields refused | `UiToolsTests`, `UiAutomationTests` (Windows CI) |
+| T19 | Hung or malicious target app freezes the agent | UIA on a dedicated MTA worker with per-call timeouts; hung worker abandoned and replaced; snapshot size/depth/time bounds | `UiAutomationTests.HungAppTimesOutWithoutBlockingVoxStride` |
+| T20 | Covert screen capture | Single-window `PrintWindow` only, never the whole screen; per-use approval or *Never*; never stored; sent once as an untrusted image | `UiToolsTests` capture policy, `ProviderImageTests` |
+| T21 | Another program impersonates the extension or the app over IPC | Native host registered under HKCU with `allowed_origins` = fixed extension id; relay only forwards; pipe is `CurrentUserOnly`; app requires the allowlisted origin + protocol version; 1 MB message cap; request ids and timeouts | `ExtensionBridgeTests` (wrong origin/version refused, oversized frame), installer host checks |
+| T22 | Extension over-reach in the user's browser | MV3 with `activeTab` + optional per-site host permissions granted by the user; acts on the active tab only; tab origin re-checked per request; no cookies/storage/password access; badge shows activity; blocked sites refused in the app | `ExtensionEndToEndTests` (origin mismatch refused), manifest review |
+| T23 | Tampered update | Updates only from the GitHub Releases API over HTTPS; installer SHA-256 must match `SHA256SUMS.txt`; per-user install, no elevation | `UpdateLogic` tests (`PrereleaseAndForeignHostsAreIgnored`, `ChecksumLookupMatchesFileName`); residual: unsigned until a certificate is approved |
 
 ## Residual risks (open)
 - Wake-phrase false accepts and recognition accuracy on real microphones are unmeasured (V06).
 - Windows 11 Notepad session-restore can open a non-empty tab, in which case insertion is refused rather than overwriting. This needs physical verification.
-- Live web prompt-injection fixtures and the existing-browser extension (P5b) are not implemented.
+- Injection detection is heuristic. The real defence is that page text can't authorize anything: every effect still needs a committed instruction, an allowed tool and, for anything irreversible, a click.
+- The extension is installed unpacked until store listings are approved (paid accounts). Developer-mode extensions trigger a browser warning banner.
+- Own-voice gating is not acoustic echo cancellation; loud speakers can still be heard between replies.
 - The installer is unsigned until the owner provides a certificate.
 - No independent third-party security review has been performed.

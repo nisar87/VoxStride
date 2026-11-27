@@ -34,6 +34,7 @@ try {
     Step "browser-host-registered-$($b.Split('\')[0])" ((Get-ItemProperty -Path $k -ErrorAction SilentlyContinue).'(default)' -eq $hostJson) $k
   }
   Step 'extension-files' ((Test-Path (Join-Path $appDir 'browser-extension\manifest.json')) -and (Test-Path (Join-Path $appDir 'browser-extension\background.js'))) 'manifest.json, background.js'
+  Step 'licence-and-notices' ((Test-Path (Join-Path $appDir 'LICENSE.txt')) -and (Test-Path (Join-Path $appDir 'THIRD-PARTY-NOTICES.md'))) 'LICENSE.txt, THIRD-PARTY-NOTICES.md'
 
   $smoke = Join-Path $env:TEMP 'voxstride-smoke-installed.json'
   $p = Start-Process -FilePath $exe -ArgumentList '--smoke-test', '--out', $smoke -Wait -PassThru

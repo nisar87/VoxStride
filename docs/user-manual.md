@@ -32,6 +32,33 @@ Under **Voice → How VoxStride sounds**, tick **Natural human-like voice** (nee
 | "Search YouTube for lo-fi music and play the third video in the top row" | Needs a provider. Opens the VoxStride browser window (Microsoft Edge), skips ads and Shorts, and asks if the position is ambiguous. |
 | "Open ChatGPT and draft a prompt asking for a weekly meal plan" | Needs a provider. Types the prompt into ChatGPT **without sending it**. You review it and press Enter yourself. You sign in yourself the first time. |
 
+## 3a. Files anywhere you allow
+VoxStride can list, search, create folders, move, rename, copy and recycle files, but only inside the folders you allow. By default that's Desktop, Documents, Downloads, Pictures, Music and Videos. Add or remove folders under **Settings › Permissions**. Every change shows the exact list for approval first. "Undo that" puts things back. Deleting always goes to the Recycle Bin.
+
+## 3b. Controlling other apps
+With an AI key, VoxStride can read and operate the windows of other apps: "in Calculator press 7 plus 5 equals", "fill the name field in this form with Ali". It reads the app's controls through Windows accessibility, so nothing is guessed from pixels.
+- It never touches Windows security prompts, sign-in screens, password boxes, VoxStride itself or apps you've blocked under **Permissions › Blocked apps**.
+- Buttons like Send, Delete, Pay or Submit, and any click at a screen position, need your click on **Approve**.
+- If an app's controls can't be read, VoxStride may ask to **take one screenshot of that window** to look at it. Approve it each time, or set **Screenshots** to *Never* under Permissions. Screenshots are never saved.
+- If you switch windows or move the mouse while it is typing, it stops.
+- Apps running as administrator can't be controlled. VoxStride tells you instead.
+
+## 3c. Working in your own Chrome or Edge
+By default, web tasks run in VoxStride's own Edge window. To let VoxStride work in the browser you already use, where you're signed in:
+1. Open **Settings › Browser** and click **Show extension folder**.
+2. In Chrome go to `chrome://extensions` (in Edge `edge://extensions`), turn on **Developer mode**, click **Load unpacked** and pick that folder.
+3. Tick **Use my browser** in Settings › Browser. The VoxStride icon in the toolbar turns green when connected.
+4. On each site you want VoxStride to use, click the VoxStride icon › **Allow on this site**. The browser asks you to confirm.
+
+VoxStride acts only in the active tab, never reads passwords, cookies or other tabs, and asks before submitting forms or pressing buttons like Buy or Send. Block sites under **Permissions › Blocked sites**. Text on web pages is treated as information, never as instructions.
+
+## 3d. Natural conversation, hold-to-talk and pause
+- **Natural mode** (Voice settings, off by default): after "Hey VoxStride", a pause of about 1.5 seconds ends your turn. Natural turns can only **answer and look things up**. To change anything, say **"VoxStride, execute"** afterwards, or finish with it as usual.
+- **Hold-to-talk** (Voice › Talk key): hold **Ctrl+Alt+V** while speaking. Releasing it sends the instruction.
+- **Pause**: **Ctrl+Alt+P** or the **Pause** button holds a running task before its next step. Press again to continue, or Stop to cancel.
+- **Backup provider** (Reasoning providers): if your main AI provider is down before a task has done anything, VoxStride uses the backup instead.
+- While VoxStride is speaking, it ignores what the microphone hears so it doesn't react to its own voice. This is not full echo cancellation. With loud speakers, use headphones or lower the volume.
+
 ## 4. Approvals
 Changes to your files show an approval window with the exact list of what will happen. Only a mouse click on **Approve** allows it. Voice, the Enter key and timeouts never approve. For desktop organizing, you can tick **Always allow reversible organizing of this folder**. You still give each command, nothing is ever deleted or overwritten under this rule, and you can revoke it under **Privacy & permissions**.
 
@@ -56,5 +83,6 @@ VoxStride checks GitHub for new versions, verifies each download's checksum, and
 - **VoxStride doesn't seem to hear you**: open **Voice**, pick the microphone you speak into, and click **Test speech**. It listens for 6 seconds with the real speech engine and shows the words it understood. It also tells you whether the microphone sent no audio, only silence, or sound the engine couldn't understand. A new microphone choice applies when you click **Save**, without a restart.
 - **The words are wrong**: the offline Windows engine is weak with non-native accents. Cloud speech (an OpenAI or Gemini key plus **Use cloud speech recognition**) is far more accurate. A Claude key can't transcribe audio. Windows online dictation (Win+H) isn't available to installer-based apps like VoxStride.
 - **Provider errors**: "rejected the API key" means re-enter the key. "rate-limiting" means wait a moment. "model isn't available" means choose a model from the list and click Test connection.
-- **Browser tasks**: Microsoft Edge must be installed (it ships with Windows 11). Sign in to ChatGPT inside the VoxStride browser window.
+- **Browser tasks**: Microsoft Edge must be installed (it ships with Windows 11). Sign in to ChatGPT inside the VoxStride browser window, or use the extension (3c). If the toolbar icon stays grey, reopen the browser after installing VoxStride, and check that **Use my browser** is ticked.
+- **Setup again**: Settings › About › **Run setup again** reopens the 4-step setup (microphone, AI key, folders, browser).
 - **Diagnostics**: see About & diagnostics for timings, memory and configuration. **Export redacted diagnostics** writes a file without instructions, paths, keys or audio.

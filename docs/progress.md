@@ -1,58 +1,70 @@
-# Progress report and independent audit
+# Progress report and audit
 
-_Last updated: 26 November 2026, after green CI run 45760942621 (commit f53ddf6 and later docs)._
+_Last updated: 27 November 2026, release 0.6.0+ (green CI run 45943987252)._
 
 ## Summary
-VoxStride builds, tests, packages, installs and uninstalls cleanly on Windows in CI. The core safety and voice contract is implemented and verified by automated tests: explicit commit, authorization, journaled and verified execution, undo, and three provider adapters. The pieces that **cannot be verified without a physical Windows 11 PC, a real microphone or live API keys** are implemented but marked unverified below. Two spec items are not started: the browser extension for the user's existing browser (P5b) and the UIA/vision fallback worker (part of P4).
+Every phase P0–P6 in the master plan is implemented. Each is verified by automated tests in CI on Linux and Windows, including real Windows UI Automation, a real Edge browser with the VoxStride extension, real speech recognition on synthesized live audio, and installer and uninstaller runs with measured performance.
 
-This is **not** a claim of "100% complete".
+Some items **can't be verified by automation**: they need the owner's physical PC, microphone or live API keys, or money or an independent party. Those are listed under *Open items* with what each one needs. P7 (expansion) is "only after release gates" by design and has not started.
 
-## Test results (actual, from CI)
+This is **not** a claim that everything has been verified on a physical PC.
+
+## Test results (actual, from CI run 45943987252)
 | Suite | Linux | Windows |
 |---|---|---|
-| Core (broker, policy, router, voice, files, providers, run coordinator) | 160 / 160 passed | 160 / 160 passed |
+| Core (broker, policy, router, voice, audio pipeline, files, UI/web tool policy, extension bridge, providers, run coordinator, logging) | 302 / 302 | 302 / 302 |
 | Persistence (SQLite) | 5 / 5 | 5 / 5 |
-| Windows integration (known folders, Credential Manager, Recycle Bin, app catalog, **Notepad write + read-back**, speech env) | — | 14 / 14 |
-| Installer: silent per-user install → smoke test from installed exe → uninstall → data removed | — | passed |
-| Vulnerable-package audit | — | clean, after pinning SQLitePCLRaw 2.1.13 for GHSA-2m69-gcr7-jv3q |
-| Secret scan | passed | — |
+| Windows integration: known folders, Credential Manager, Recycle Bin, app catalog, Notepad write+read-back, **speech pipeline E2E**, **UI Automation E2E + 100-attempt gate**, **Playwright fixtures + 100-attempt gate**, **real-Edge extension E2E** | — | 35 / 35 |
+| Installer: install → native-host registration → smoke test (30-run latency, cancel, log file) → 60 s idle measurement → uninstall → host unregistered → data removed | — | passed |
+| Vulnerable-package audit / secret scan | — / passed | clean / — |
 
-Evidence: [benchmarks/2026-11-26-ci-windows-latest.json](benchmarks/2026-11-26-ci-windows-latest.json).
+## Measured (installed build on the GitHub Windows runner; not the owner's PC)
+Raw evidence: [benchmarks/2026-11-27-ci-installed-build.json](benchmarks/2026-11-27-ci-installed-build.json).
 
-Measured on the CI runner, not a target PC: host startup 288 ms (headless), working set 70.9 MB (headless, no UI/speech), direct drive read 15–42 ms commit → verified, app catalog 116 entries.
+| Metric (spec §11) | Target | Measured |
+|---|---|---|
+| Direct native command, commit → verified | p95 ≤ 2 s (dispatch ≤ 500 ms) | **p50 5.7 ms, p95 8.5 ms** (30 runs) |
+| Hard stop | ≤ 500 ms | Stop call 0.2 ms on the installed build (no provider configured, so nothing was in flight). In-flight cancellation of a slow provider is covered by `L03`, and stopping live speech by `SpeechPipelineTests` (48 ms). |
+| Idle CPU | < 2 % | **0.18 %** (60 s, no microphone on the runner) |
+| Idle working set | < 180 MB | **148 MB** |
+| Command integrity | 0 premature in ≥200 trials | **0 / 240** scripted pause/correction/quoted-control trials |
+| GUI workflows | ≥95 % over 100+ per class | **100/100** set value, **100/100** invoke+verify, **100/100** toggle (fixture app) |
+| Browser workflows | ≥95 % over 100+ | **100/100** observe → fill → submit → verify → back (fixture site) |
+| Offline speech on live audio | words recognized | "Please open a calculator and the notepad", in 2/2 sessions |
 
 ## Phase status
-
-| Phase | Status | Notes |
+| Phase | Status | Evidence / notes |
 |---|---|---|
-| P0 research/spikes | **Partial** | Research, ADRs, threat model and docs done. Competitor hands-on trials and the UFO VM benchmark are pending (they need a disposable Windows VM). |
-| P1 safe vertical slice | **Verified** | Contracts, broker, journal, router, three adapters (fixture-verified), disk and app tools, CI. |
-| P2 voice engine | **Implemented; logic verified** | 240-trial scripted gate: zero premature commits. 0.3.0 rebuilt the audio path on one shared microphone (ADR-0009). The offline engine is verified end to end on Windows CI with synthesized speech fed as live audio. The owner's physical microphone, wake latency and false-accept rate are unmeasured. |
-| P3 files/system | **Verified** | Organizer, exclusions, collisions, path escapes, TOCTOU, undo conflicts, crash reporting, temp cleanup with measured bytes. |
-| P4 desktop apps | **Partial** | Notepad and Notepad++ adapter (exact-HWND write and read-back; Notepad verified on CI). Not started: UIA worker process, vision fallback, multi-monitor/DPI GUI tests. |
-| P5 browser | **Partial** | P5a Playwright and Edge (YouTube visible-row selection, ChatGPT draft-only) implemented, with layout logic unit-verified. Live sites unverified. P5b existing-browser extension not started. |
-| P6 UX/hardening | **Implemented** | WPF Fluent UI, overlay, approvals, history/undo, privacy, budgets, diagnostics, hotkeys, lock handling, installer. Physical UI/accessibility review, code signing and an independent security review are pending. |
-| P7 expansion | Not started (by design) | — |
+| P0 research/spikes | **Implemented** | `research.md`, ADRs 0001–0012, threat model, SBOM-lite and vulnerability audit in CI. Hands-on competitor trials need a disposable VM; see open items. |
+| P1 safe vertical slice | **Verified** | Contracts, broker order, journal, router, three streaming adapters (fixture contract tests), disk/app tools, CI. |
+| P2 voice engine | **Verified (automation)** | Shared microphone pipeline (ADR-0009), pre-roll at the wake hand-over, own-voice gating, device recovery, hold-to-talk, explicit commit (240-trial gate), offline engine E2E on live audio, natural mode (read-only, ADR-0012). |
+| P3 files/system | **Verified** | Organizer, temp cleanup with measured bytes, general file tools (list, search, create, move, rename, copy, recycle) in a user scope, undo across folders, TOCTOU re-checks. |
+| P4 desktop control | **Verified (CI desktop)** | UIA worker with timeouts (ADR-0010): windows/focus/observe/invoke/set value/type, consented capture plus click with vision input to all providers. Gate 100/100 per class; hung-app timeout; stale-id refusal. Notepad adapter verified. |
+| P5 browser | **Verified (fixtures + real Edge)** | Generic observe/search/click/fill/back; YouTube "Nth in top row" across 1–4 columns, ads and resize; ChatGPT draft-only; MV3 extension + native host + pipe (ADR-0011) verified end to end in real Edge on CI. |
+| P6 UX/hardening | **Implemented; partly verified** | 4-step setup, permissions (folders/apps/sites/screenshots), pause/resume, backup provider, diagnostics log with redaction and report export, in-app updates with SHA-256 verification, installer with host registration. |
+| P7 expansion | Not started (by design) | The spec allows P7 only after release gates, as separately approved scope. |
 
 ## Flagship scenarios (spec §18)
 | # | Scenario | State |
 |---|---|---|
-| 1 | Long spoken instruction with pauses + explicit finish | Logic verified (240 trials). Real-mic verification pending. |
+| 1 | Long spoken instruction with pauses + explicit finish | Logic verified (240 trials). Speech path verified on synthesized live audio. **Owner's microphone pending.** |
 | 2 | Desktop organization with exclusions + undo | Verified on synthetic fixtures (Linux + Windows). |
-| 3 | Drive check + confirmed temp cleanup | Drive check verified from the installed exe. Cleanup verified on fixtures. |
-| 4 | Open Notepad++ and write requested text | Notepad path verified on CI. Notepad++ not installed on the runner, so it needs a physical test. The text-generation step needs a live provider. |
-| 5 | ChatGPT draft + YouTube precise selection | Implemented. Live verification pending (needs sign-in and network). |
+| 3 | Drive check + confirmed temp cleanup | Verified on the installed exe and fixtures. |
+| 4 | Open Notepad++ and write requested text | Notepad verified on CI. Notepad++ needs a physical PC (not installed on the runner). The generic UIA path is verified on the fixture app. Text generation needs a live provider. |
+| 5 | ChatGPT draft + YouTube precise selection | Selection logic verified on layout fixtures in real Edge. Live sites need sign-in and network (opt-in). |
 
-## Open items that need the owner
-1. **Live API keys** (Claude, Gemini, OpenAI test keys with small budgets) to run the live smoke tests in [acceptance-tests.md](acceptance-tests.md#live-provider-smoke-tests). Enter keys only in the app (Windows Credential Manager), never in chat or the repo.
-2. **A physical Windows 11 PC with a microphone** (a dedicated test account is recommended) for M-V01, M-V06, wake latency, idle CPU/RAM, Notepad++, YouTube and ChatGPT.
-3. **Code-signing certificate** (a paid decision) before any public release.
-4. **License choice** for the repository. No license has been added yet, per spec §16 P0.
+## Open items (cannot be closed by automation; nothing here blocks use)
+1. **Physical voice verification** (owner): run Settings › Voice › Test speech and the wake-word test on the owner's microphone; collect wake latency and false triggers over a few hours. Diagnostics logging (0.3.1) records the evidence automatically.
+2. **Live provider smoke tests** with each provider's key (owner's keys stay on the owner's PC; CI has none).
+3. **Code signing** of the installer and updates: needs a paid certificate. Not purchased (CLAUDE.md: no costs without permission). Updates are integrity-checked (SHA-256 from the release) and fetched over HTTPS from GitHub only.
+4. **Browser extension store listing** (Chrome Web Store / Edge Add-ons) needs paid developer accounts. Until then it is installed unpacked (Settings › Browser).
+5. **Independent security review** by a party other than the author. The threat model and adversarial tests are in place.
+6. **Physical multi-monitor/DPI, Notepad++, accessibility (screen reader) review** on a real desktop.
+7. **Hands-on competitor trials and the UFO benchmark** in a disposable Windows VM (P0).
 
 ## Known limitations
-- The wake phrase uses Windows grammar recognition. Accuracy and false-accept rate are unmeasured, and the hotkey always works as an alternative.
-- Without an OpenAI or Gemini key, dictation uses the offline Windows recognizer, which is weak with non-native accents. Cloud STT (OpenAI/Gemini) is available with consent and a key. Windows online dictation can't be used by an unpackaged app (ADR-0009).
-- Push-to-talk is a press-to-start / press-to-finish toggle, not hold-to-talk.
-- If Windows 11 Notepad restores a non-empty tab, VoxStride refuses to write rather than overwrite.
-- The browser only works in VoxStride's own Edge window, not in the user's existing browser (P5b).
-- Cloud-path latency p50/p95 per provider has not been measured.
+- Without an OpenAI or Gemini key (with cloud speech on), dictation uses the offline Windows engine, which is weak with non-native accents. A Claude key can't transcribe audio.
+- Windows online dictation (Win+H's engine) needs an MSIX-packaged app and is not used (ADR-0009).
+- Elevated (administrator) apps can't be typed into from a normal-user VoxStride (Windows UIPI). VoxStride reports this instead of trying to bypass it.
+- The extension must be loaded unpacked until a store listing exists.
+- If Windows 11 Notepad restores a non-empty tab, the Notepad adapter refuses to write rather than overwrite.

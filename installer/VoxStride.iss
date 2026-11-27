@@ -46,6 +46,8 @@ Name: "startup"; Description: "Start VoxStride when I sign in"; GroupDescription
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Browser extension for the user's own Chrome/Edge (loaded unpacked by the user; see Settings > Browser).
 Source: "..\extension\*"; DestDir: "{app}\browser-extension"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{userprograms}\VoxStride"; Filename: "{app}\VoxStride.exe"

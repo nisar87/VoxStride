@@ -62,6 +62,11 @@ jobs:
       - name: Dependency inventory (SBOM-lite)
         shell: pwsh
         run: dotnet list VoxStride.sln package --include-transitive --format json > TestResults/dependencies.json
+      - name: SPDX SBOM
+        shell: pwsh
+        run: |
+          python scripts/New-Sbom.py TestResults/dependencies.json ci TestResults/VoxStride.spdx.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Publish (self-contained win-x64)
         run: dotnet publish src/VoxStride.Desktop/VoxStride.Desktop.csproj -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -o artifacts/publish/win-x64
       - name: Build installer

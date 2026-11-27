@@ -1,7 +1,7 @@
 # Installation and build guide
 
 ## Install (end users)
-1. Download `VoxStride-Setup-<version>-x64.exe`. The latest build is the **VoxStride-Setup-x64** artifact on the most recent green [CI run](https://github.com/nisar87/VoxStride/actions/workflows/ci.yml).
+1. Download `VoxStride-Setup-<version>-x64.exe`. Get it from the latest [release](https://github.com/nisar87/VoxStride/releases/latest), next to `SHA256SUMS.txt` and the SPDX SBOM. Installed copies update themselves from the same page.
 2. Run it. No administrator rights are required; it installs to `%LocalAppData%\Programs\VoxStride`.
 3. The installer is currently **unsigned**, so Windows SmartScreen may warn. Choose *More info → Run anyway* only if you downloaded it from the repository above.
 4. Requirements: Windows 10 2004+ or Windows 11, x64. Microsoft Edge (preinstalled on Windows 11) for browser tasks. An English Windows speech recognizer for voice (Settings › Time & language › Speech).

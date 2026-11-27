@@ -1,0 +1,155 @@
+{
+ "caseId": "INST-01",
+ "installer": "VoxStride-Setup-0.1.0-x64.exe",
+ "os": "Microsoft Windows NT 10.0.26100.0",
+ "steps": [
+  {
+   "name": "install-exit-code",
+   "ok": true,
+   "detail": "exit 0, 8s"
+  },
+  {
+   "name": "exe-present",
+   "ok": true,
+   "detail": "C:\\Users\\runneradmin\\AppData\\Local\\Programs\\VoxStride\\VoxStride.exe"
+  },
+  {
+   "name": "uninstall-entry-hkcu",
+   "ok": true,
+   "detail": "per-user uninstall registration"
+  },
+  {
+   "name": "no-admin-required",
+   "ok": true,
+   "detail": "not installed under Program Files"
+  },
+  {
+   "name": "browser-host-manifest",
+   "ok": true,
+   "detail": "C:\\Users\\runneradmin\\AppData\\Local\\Programs\\VoxStride\\browser-extension\\com.voxstride.bridge.json"
+  },
+  {
+   "name": "browser-host-path",
+   "ok": true,
+   "detail": "C:\\Users\\runneradmin\\AppData\\Local\\Programs\\VoxStride\\VoxStride.exe"
+  },
+  {
+   "name": "browser-host-origin",
+   "ok": true,
+   "detail": "chrome-extension://ljfgkidknpjooifilobgenemahnnefop/"
+  },
+  {
+   "name": "browser-host-registered-Google",
+   "ok": true,
+   "detail": "HKCU:\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.voxstride.bridge"
+  },
+  {
+   "name": "browser-host-registered-Microsoft",
+   "ok": true,
+   "detail": "HKCU:\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.voxstride.bridge"
+  },
+  {
+   "name": "extension-files",
+   "ok": true,
+   "detail": "manifest.json, background.js"
+  },
+  {
+   "name": "smoke-test",
+   "ok": true,
+   "detail": "exit 0"
+  },
+  {
+   "name": "idle-cpu-below-2pct",
+   "ok": true,
+   "detail": "0.18 %"
+  },
+  {
+   "name": "idle-working-set-below-180mb",
+   "ok": true,
+   "detail": "148.1 MB"
+  },
+  {
+   "name": "uninstall-exit-code",
+   "ok": true,
+   "detail": "exit 0"
+  },
+  {
+   "name": "app-removed",
+   "ok": true,
+   "detail": "C:\\Users\\runneradmin\\AppData\\Local\\Programs\\VoxStride\\VoxStride.exe"
+  },
+  {
+   "name": "browser-host-unregistered",
+   "ok": true,
+   "detail": "native host key removed"
+  },
+  {
+   "name": "data-removed",
+   "ok": true,
+   "detail": "user data folder removed on silent uninstall"
+  }
+ ],
+ "smoke": {
+  "caseId": "SMOKE-01",
+  "os": "Microsoft Windows NT 10.0.26100.0",
+  "dotnet": "10.0.15",
+  "startupMs": 190.055,
+  "workingSetMb": 74.52734375,
+  "apps": 116,
+  "hasNotepad": true,
+  "results": [
+   {
+    "text": "how much space is left on C",
+    "Success": true,
+    "SpokenSummary": "You've got about 26 gigabytes free on drive C, out of about 161 gigabytes \u2014 about 16% free. It's getting a bit full.",
+    "ms": 37.3183,
+    "pass": true
+   },
+   {
+    "text": "list my drives",
+    "Success": true,
+    "SpokenSummary": "C:\\ 26.01 GB free of 160.94 GB; D:\\ 234.92 GB free of 236.21 GB",
+    "ms": 13.1958,
+    "pass": true
+   },
+   {
+    "text": "write a poem about rain",
+    "Success": false,
+    "SpokenSummary": "I'd love to help with that, but I need an AI key for it. Add a Claude, Gemini or OpenAI key in Settings. Things like checking disk space, opening apps and tidying your desktop already work without one.",
+    "ms": 4.7822,
+    "pass": true
+   }
+  ],
+  "latency": {
+   "runs": 30,
+   "p50Ms": 5.7,
+   "p95Ms": 8.5,
+   "maxMs": 9.2,
+   "targetP95Ms": 2000
+  },
+  "cancelMs": 0.2,
+  "log": {
+   "path": "%LocalAppData%\\VoxStride\\logs\\voxstride.log",
+   "bytes": 35915,
+   "checks": {
+    "session": true,
+    "route": true,
+    "toolStep": true,
+    "runEnd": true,
+    "noProvider": true,
+    "format": true
+   },
+   "passed": true
+  },
+  "status": "passed"
+ },
+ "idle": {
+  "cores": 4,
+  "seconds": 60,
+  "cpuPercentAvg": 0.18,
+  "note": "CI runner: no microphone, so wake-word listening is inactive",
+  "workingSetMb": 148.1
+ },
+ "status": "passed",
+ "source": "GitHub Actions CI run 45943987252, windows-latest, installed build"
+}

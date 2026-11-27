@@ -52,6 +52,12 @@ jobs:
       - name: Verify installer (install, smoke test, uninstall)
         shell: pwsh
         run: scripts/Test-Installer.ps1 -Installer (Get-ChildItem artifacts/installer/*.exe | Select-Object -First 1).FullName -Evidence artifacts/installer-evidence.json
+      - name: SPDX SBOM
+        shell: pwsh
+        run: |
+          dotnet list VoxStride.sln package --include-transitive --format json > artifacts/dependencies.json
+          python scripts/New-Sbom.py artifacts/dependencies.json ${{ steps.ver.outputs.version }} "artifacts/VoxStride-${{ steps.ver.outputs.version }}.spdx.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Checksums
         shell: pwsh
         run: |
@@ -66,6 +72,6 @@ jobs:
         run: |
           $v = "${{ steps.ver.outputs.version }}"
           $notes = if (Test-Path "docs/releases/v$v.md") { "docs/releases/v$v.md" } else { $null }
-          $ghArgs = @("v$v", "artifacts/installer/VoxStride-Setup-$v-x64.exe", "artifacts/installer/SHA256SUMS.txt", "--title", "VoxStride $v", "--target", "${{ github.sha }}")
+          $ghArgs = @("v$v", "artifacts/installer/VoxStride-Setup-$v-x64.exe", "artifacts/installer/SHA256SUMS.txt", "artifacts/VoxStride-$v.spdx.json", "--title", "VoxStride $v", "--target", "${{ github.sha }}")
           if ($notes) { $ghArgs += @("--notes-file", $notes) } else { $ghArgs += @("--generate-notes") }
           gh release create @ghArgs
