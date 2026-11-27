@@ -143,12 +143,7 @@ public sealed class UiAutomationGateTests(ITestOutputHelper output) : IDisposabl
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "VoxStride.sln"))) dir = dir.Parent;
         var exe = Directory.GetFiles(Path.Combine(dir!.FullName, "tests", "VoxStride.UiFixture", "bin"), "VoxStride.UiFixture.exe", SearchOption.AllDirectories).OrderByDescending(File.GetLastWriteTimeUtc).First();
         _fixture = Process.Start(new ProcessStartInfo(exe, $"\"{title}\"") { UseShellExecute = false })!;
-        for (var i = 0; i < 100; i++)
-        {
-            await Task.Delay(100);
-            if ((await _ui.ListWindowsAsync(CancellationToken.None)).FirstOrDefault(x => x.ProcessId == _fixture.Id) is { } w) return w;
-        }
-        throw new TimeoutException("fixture did not start");
+        return await UiFixtureReady.WaitAsync(_ui, _fixture, title);
     }
 
     [Fact]
@@ -223,10 +218,10 @@ public sealed class UiElementIdTests : IDisposable
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "VoxStride.sln"))) dir = dir.Parent;
         var exe = Directory.GetFiles(Path.Combine(dir!.FullName, "tests", "VoxStride.UiFixture", "bin"), "VoxStride.UiFixture.exe", SearchOption.AllDirectories).OrderByDescending(File.GetLastWriteTimeUtc).First();
-        _p = Process.Start(new ProcessStartInfo(exe, "\"Ids " + Guid.NewGuid().ToString("N")[..6] + "\"") { UseShellExecute = false })!;
-        UiWindow? w = null;
-        for (var i = 0; i < 100 && w is null; i++) { await Task.Delay(100); w = (await _ui.ListWindowsAsync(CancellationToken.None)).FirstOrDefault(x => x.ProcessId == _p.Id); }
-        var full = await _ui.ObserveAsync(w!.Id, null, 150, CancellationToken.None);
+        var title = "Ids " + Guid.NewGuid().ToString("N")[..6];
+        _p = Process.Start(new ProcessStartInfo(exe, "\"" + title + "\"") { UseShellExecute = false })!;
+        var w = await UiFixtureReady.WaitAsync(_ui, _p, title);
+        var full = await _ui.ObserveAsync(w.Id, null, 150, CancellationToken.None);
         var subscribe = full!.Elements.First(e => e.Name == "Subscribe");
         var filtered = await _ui.ObserveAsync(w.Id, "Greet", 150, CancellationToken.None);
         Assert.DoesNotContain(filtered!.Elements, e => e.Id == subscribe.Id);
@@ -235,4 +230,26 @@ public sealed class UiElementIdTests : IDisposable
     }
 
     public void Dispose() { try { if (_p is { HasExited: false }) _p.Kill(); } catch (Exception) { } _p?.Dispose(); _ui.Dispose(); }
+}
+
+/// <summary>
+/// Waits until the fixture's main window exists (by process AND title) and its controls are exposed to UI Automation.
+/// On a busy CI runner the window can be listed before WinForms has created its controls, which made observations
+/// taken too early come back without "Greet"/"Subscribe".
+/// </summary>
+internal static class UiFixtureReady
+{
+    public static async Task<UiWindow> WaitAsync(WindowsUiAutomation ui, Process p, string title, int timeoutMs = 30000)
+    {
+        var sw = Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            await Task.Delay(150);
+            var w = (await ui.ListWindowsAsync(CancellationToken.None)).FirstOrDefault(x => x.ProcessId == p.Id && x.Title == title);
+            if (w is null) continue;
+            var snap = await ui.ObserveAsync(w.Id, null, 150, CancellationToken.None);
+            if (snap is not null && snap.Elements.Any(e => e.Name == "Greet") && snap.Elements.Any(e => e.Name == "Your name")) return w;
+        }
+        throw new TimeoutException($"fixture \"{title}\" did not become ready in {timeoutMs} ms");
+    }
 }
