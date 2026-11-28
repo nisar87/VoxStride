@@ -59,6 +59,9 @@ public sealed class AppSettings
     public bool LiveStartListening { get; set; } = true;
     /// <summary>Using speakers rather than a headset: VoxStride stops listening while it talks so it doesn't hear itself.</summary>
     public bool LiveUsingSpeakers { get; set; }
+    /// <summary>Let the companion glance at the screen now and then and comment (needs "Looking at my screen: whenever it needs to").</summary>
+    public bool LiveScreenComments { get; set; }
+    public int LiveScreenCommentSeconds { get; set; } = 90;
     public bool CompanionVisible { get; set; } = true;
     /// <summary>Where the companion was last placed (null: bottom-right of the screen).</summary>
     public double? CompanionLeft { get; set; }

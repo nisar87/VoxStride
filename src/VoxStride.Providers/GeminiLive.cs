@@ -49,6 +49,7 @@ public static class GeminiLiveCodec
             ["contextWindowCompression"] = new JsonObject { ["slidingWindow"] = new JsonObject() },
             ["sessionResumption"] = s.ResumeHandle is { Length: > 0 } h ? new JsonObject { ["handle"] = h } : new JsonObject(),
         };
+        if (s.Proactive) setup["proactivity"] = new JsonObject { ["proactiveAudio"] = true }; // may stay silent on screen updates
         return new JsonObject { ["setup"] = setup }.ToJsonString();
     }
 

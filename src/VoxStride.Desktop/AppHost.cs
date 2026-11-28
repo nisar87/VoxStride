@@ -284,6 +284,10 @@ public sealed class AppHost : IAsyncDisposable
             AssistantName = Settings.CompanionImagePath is null ? CompanionCharacters.Get(Settings.CompanionCharacter).Name : null,
             Personality = Settings.CompanionPersonality ?? (Settings.CompanionImagePath is null ? CompanionCharacters.Get(Settings.CompanionCharacter).Personality : null),
             Memory = Memory.AsPrompt,
+            ScreenForComments = Settings.LiveScreenComments && Settings.ScreenCapture == Core.Policy.ScreenCapturePolicy.WhenNeeded
+                ? async ct => await UiAutomation.CaptureScreenAsync(ct) is { } shot ? (shot.Image, shot.MimeType) : null
+                : null,
+            ScreenCommentInterval = TimeSpan.FromSeconds(Math.Clamp(Settings.LiveScreenCommentSeconds, 30, 900)),
         };
         Log.Info("live", $"companion configured voice={options.Voice} halfDuplex={options.HalfDuplex} tools={Registry.Definitions.Count} memoryFacts={Memory.All().Count}");
         return new LiveCompanion(() => new GeminiLiveTransport(key), Microphone, speaker, Registry, Broker, Authority, LiveApprovals, Speech, options, TimeProvider.System);

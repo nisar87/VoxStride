@@ -8,7 +8,8 @@ public sealed record LiveSetup(
     IReadOnlyList<ToolDefinition> Tools,
     string Voice,
     bool WebSearch,
-    string? ResumeHandle);
+    string? ResumeHandle,
+    bool Proactive = false);
 
 public sealed record LiveFunctionCall(string Id, string Name, JsonObject Args);
 

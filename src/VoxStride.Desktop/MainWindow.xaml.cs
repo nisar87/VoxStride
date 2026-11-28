@@ -212,7 +212,7 @@ public partial class MainWindow : Window
         BlockedAppsBox.Text = string.Join(Environment.NewLine, s.BlockedApps);
         BlockedSitesBox.Text = string.Join(Environment.NewLine, s.BlockedSites);
         ScreenPolicyBox.SelectedItem = ScreenPolicyBox.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == s.ScreenCapture.ToString()) ?? ScreenPolicyBox.Items[0];
-        LiveModeBox.IsChecked = s.LiveMode; LiveStartBox.IsChecked = s.LiveStartListening; LiveSpeakersBox.IsChecked = s.LiveUsingSpeakers;
+        LiveModeBox.IsChecked = s.LiveMode; LiveStartBox.IsChecked = s.LiveStartListening; LiveSpeakersBox.IsChecked = s.LiveUsingSpeakers; LiveScreenBox.IsChecked = s.LiveScreenComments;
         UserNameBox.Text = s.UserName ?? ""; PersonalityBox.Text = s.CompanionPersonality ?? "";
         RefreshMemoryList();
         _ = RefreshLiveUsageAsync();
@@ -337,7 +337,8 @@ public partial class MainWindow : Window
         var wakeChanged = s.WakeWordEnabled != (WakeBox.IsChecked == true);
         s.WakeWordEnabled = WakeBox.IsChecked == true; s.YieldMicToOtherApps = YieldBox.IsChecked == true; s.AllowPlainProceed = PlainProceedBox.IsChecked == true;
         var characterBefore = s.CompanionCharacter;
-        var liveBefore = (s.LiveMode, s.LiveUsingSpeakers, s.UserName, s.CompanionPersonality, s.CloudVoiceName);
+        var liveBefore = (s.LiveMode, s.LiveUsingSpeakers, s.UserName, s.CompanionPersonality, s.CloudVoiceName, s.LiveScreenComments);
+        s.LiveScreenComments = LiveScreenBox.IsChecked == true;
         s.LiveMode = LiveModeBox.IsChecked == true; s.LiveStartListening = LiveStartBox.IsChecked == true; s.LiveUsingSpeakers = LiveSpeakersBox.IsChecked == true;
         s.UserName = UserNameBox.Text.Trim() is { Length: > 0 } un ? un : null;
         s.CompanionPersonality = PersonalityBox.Text.Trim() is { Length: > 0 } pe ? pe : null;
@@ -376,7 +377,7 @@ public partial class MainWindow : Window
             await _app.ChooseCharacterAsync(ch.Id); // also sets its voice and restarts the conversation
             LoadSettingsIntoUi();
         }
-        else if (liveBefore != (s.LiveMode, s.LiveUsingSpeakers, s.UserName, s.CompanionPersonality, s.CloudVoiceName))
+        else if (liveBefore != (s.LiveMode, s.LiveUsingSpeakers, s.UserName, s.CompanionPersonality, s.CloudVoiceName, s.LiveScreenComments))
         {
             if (!s.LiveMode) await _app.StopCompanionAsync("live mode turned off");
             else if (_app.Companion is { IsOn: true }) await _app.RestartCompanionAsync(); // new voice, name or personality

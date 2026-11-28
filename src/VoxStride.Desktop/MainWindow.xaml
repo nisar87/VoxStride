@@ -221,7 +221,8 @@
                                        Text="With a Gemini key, the VoxStride character on your desktop listens and talks back in real time. You can interrupt it, and it does what you ask straight away. It only asks first for things that can't be undone (deleting, sending, paying, submitting)." />
                             <CheckBox x:Name="LiveModeBox" Content="Use live conversation with the on-screen character" Margin="0,4" />
                             <CheckBox x:Name="LiveStartBox" Content="Start listening as soon as VoxStride starts" Margin="0,4" />
-                            <CheckBox x:Name="LiveSpeakersBox" Content="I use speakers, not a headset (VoxStride pauses listening while it talks)" Margin="0,4" />
+                            <CheckBox x:Name="LiveSpeakersBox" Content="I use speakers, not a headset (you interrupt by speaking louder than its voice)" Margin="0,4" />
+                            <CheckBox x:Name="LiveScreenBox" Content="Glance at my screen now and then and comment if something is interesting (needs &quot;Looking at my screen: whenever it needs to&quot; under Permissions)" Margin="0,4" />
                             <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                                 <TextBlock Text="Character" VerticalAlignment="Center" Width="110" />
                                 <ComboBox x:Name="CharacterBox" Width="260" AutomationProperties.Name="Character" />
