@@ -32,6 +32,20 @@ Raw evidence: [benchmarks/2026-11-27-ci-installed-build.json](benchmarks/2026-11
 | Browser workflows | ≥95 % over 100+ | **100/100** observe → fill → submit → verify → back (fixture site) |
 | Offline speech on live audio | words recognized | "Please open a calculator and the notepad", in 2/2 sessions |
 
+## Live companion evidence (CI run 46109364212, installed build, Windows runner)
+![Companion states](images/companion-states.png)
+
+`--companion-selftest` passed 11/11 checks. It used a scripted stand-in for Gemini Live, while every tool, the broker, approvals and the speaker were real:
+- connected with 37 tools and the "no proceed" persona;
+- spoke a greeting (Speaking state);
+- **created a real Excel sheet in Documents without being asked to proceed** (read back and verified);
+- looked at the screen (frame sent before the tool response);
+- **asked before recycling a file and did it only after a spoken "yes"**;
+- refused a change when the user had said nothing;
+- the voice stopped when the user interrupted.
+
+The installed app at rest used **0.36 % CPU and 158 MB** with the character on screen. Not covered by CI: Google's real Gemini Live service (needs the owner's key).
+
 ## Phase status
 | Phase | Status | Evidence / notes |
 |---|---|---|
@@ -42,7 +56,7 @@ Raw evidence: [benchmarks/2026-11-27-ci-installed-build.json](benchmarks/2026-11
 | P4 desktop control | **Verified (CI desktop)** | UIA worker with timeouts (ADR-0010): windows/focus/observe/invoke/set value/type, consented capture plus click with vision input to all providers. Gate 100/100 per class; hung-app timeout; stale-id refusal. Notepad adapter verified. |
 | P5 browser | **Verified (fixtures + real Edge)** | Generic observe/search/click/fill/back; YouTube "Nth in top row" across 1–4 columns, ads and resize; ChatGPT draft-only; MV3 extension + native host + pipe (ADR-0011) verified end to end in real Edge on CI. |
 | P6 UX/hardening | **Implemented; partly verified** | 4-step setup, permissions (folders/apps/sites/screenshots), pause/resume, backup provider, diagnostics log with redaction and report export, in-app updates with SHA-256 verification, installer with host registration. |
-| Live companion (owner-approved scope, 2026-11-28) | **Implemented; logic verified** | Gemini Live transport and codec, `LiveCompanion` (authorization from the user's own words, voice approvals, barge-in, VAD gating, resume), animated character and talk bar, document, screen and memory tools (ADR-0013). Live service behaviour needs the owner's key. |
+| Live companion (owner-approved scope, 2026-11-28) | **Implemented; verified on the installed build (scripted service)** | Gemini Live transport and codec, `LiveCompanion` (authorization from the user's own words, voice approvals, barge-in, VAD gating, resume), animated character and talk bar, document, screen and memory tools (ADR-0013). Live service behaviour needs the owner's key. |
 | P7 expansion | Not started (by design) | The spec allows P7 only after release gates, as separately approved scope. |
 
 ## Flagship scenarios (spec §18)
