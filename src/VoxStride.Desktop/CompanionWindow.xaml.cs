@@ -168,13 +168,14 @@ public partial class CompanionWindow : Window
     {
         if (!IsVisible) return;
         var busy = _state is CompanionState.Hearing or CompanionState.Speaking or CompanionState.Thinking or CompanionState.Working or CompanionState.AwaitingYes or CompanionState.Connecting or CompanionState.Reconnecting;
-        var wanted = TimeSpan.FromMilliseconds(busy ? 40 : 100); // 25 fps when something is happening, 10 fps at rest
+        var wanted = TimeSpan.FromMilliseconds(busy ? 40 : 150); // 25 fps when something is happening, ~7 fps at rest
         if (_frame.Interval != wanted) _frame.Interval = wanted;
         var t = (DateTime.UtcNow - _start).TotalSeconds;
         if (_forcedMouth is not null) { _blinkUntil = -1; _nextBlink = Math.Max(_nextBlink, t + 5); } // eyes open in snapshots
 
         // breathing and a gentle sway
-        Breath.Y = Math.Sin(t * 2 * Math.PI / 3.6) * 2.2;
+        var breath = Math.Round(Math.Sin(t * 2 * Math.PI / 3.6) * 2.2, 1);
+        if (Math.Abs(breath - Breath.Y) >= 0.1) Breath.Y = breath; // only redraw when it visibly moves
         var tiltTarget = _state switch
         {
             CompanionState.Hearing => -5.0,                     // leaning in to listen
