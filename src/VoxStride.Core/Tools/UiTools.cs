@@ -308,6 +308,7 @@ public sealed class CaptureWindowTool(UiSession session) : UiToolBase(session)
             return ToolValidation.Invalid("screenshots_off", "Screenshots are switched off in Settings › Permissions.");
         var (w, err) = await Session.ResolveAsync(Str(args, "windowId"), ct);
         if (err is not null) return err;
+        if (Session.Permissions.ScreenCapture == ScreenCapturePolicy.WhenNeeded) return ToolValidation.Valid(); // the user allowed looking when needed
         return ToolValidation.NeedsApproval(new ApprovalRequest(ctx.Auth.RunId, Definition.Name, "ui.capture_window",
             InvokeUiTool.OrganizationPlannerDigest(w!.Id, "capture", ctx.StepId), $"Let VoxStride see a screenshot of {w.ProcessName}?",
             [$"Window: {w.Title}", "Only this window is captured and sent to your AI provider for this task. It isn't saved.", "Reason: " + Str(args, "reason")], RiskTier.Moderate));
@@ -364,13 +365,15 @@ public sealed class ClickUiTool(UiSession session) : UiToolBase(session)
 /// <summary>Screenshots waiting to be shown to the AI (taken once by the run coordinator, never written to disk).</summary>
 public static class CapturedImages
 {
-    private static readonly ConcurrentDictionary<string, (byte[] Png, DateTimeOffset At)> Images = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, (byte[] Png, string Mime, DateTimeOffset At)> Images = new(StringComparer.Ordinal);
 
-    public static void Put(string id, byte[] png)
+    public static void Put(string id, byte[] png, string mime = "image/png")
     {
         foreach (var old in Images.Where(p => DateTimeOffset.UtcNow - p.Value.At > TimeSpan.FromMinutes(5)).Select(p => p.Key).ToList()) Images.TryRemove(old, out _);
-        Images[id] = (png, DateTimeOffset.UtcNow);
+        Images[id] = (png, mime, DateTimeOffset.UtcNow);
     }
 
     public static byte[]? Take(string id) => Images.TryRemove(id, out var v) ? v.Png : null;
+
+    public static (byte[] Image, string Mime)? TakeWithType(string id) => Images.TryRemove(id, out var v) ? (v.Png, v.Mime) : null;
 }

@@ -214,6 +214,27 @@
                             <TextBlock x:Name="EngineInfo" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,0" />
                         </StackPanel>
                     </Border>
+                    <Border CornerRadius="10" Padding="14" Background="#1A7C5CFF" Margin="0,0,0,14">
+                        <StackPanel>
+                            <TextBlock Text="Live conversation (talk like a person)" FontWeight="SemiBold" FontSize="15" />
+                            <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,2,0,6"
+                                       Text="With a Gemini key, the VoxStride character on your desktop listens and talks back in real time. You can interrupt it, and it does what you ask straight away. It only asks first for things that can't be undone (deleting, sending, paying, submitting)." />
+                            <CheckBox x:Name="LiveModeBox" Content="Use live conversation with the on-screen character" Margin="0,4" />
+                            <CheckBox x:Name="LiveStartBox" Content="Start listening as soon as VoxStride starts" Margin="0,4" />
+                            <CheckBox x:Name="LiveSpeakersBox" Content="I use speakers, not a headset (VoxStride pauses listening while it talks)" Margin="0,4" />
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <TextBlock Text="Your name" VerticalAlignment="Center" Width="110" />
+                                <TextBox x:Name="UserNameBox" Width="260" AutomationProperties.Name="Your name" />
+                            </StackPanel>
+                            <TextBlock Text="VoxStride's personality (optional)" Margin="0,8,0,2" />
+                            <TextBox x:Name="PersonalityBox" AcceptsReturn="True" Height="54" TextWrapping="Wrap" AutomationProperties.Name="Personality"
+                                     ToolTip="For example: cheerful and funny, talks to me in Roman Urdu, keeps answers short" />
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <TextBlock x:Name="MemoryCountText" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                <Button Content="Forget everything" Style="{StaticResource PlainButton}" Click="ForgetMemory_Click" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                     <Border CornerRadius="10" Padding="14" Background="#10808080" Margin="0,0,0,14">
                         <StackPanel>
                             <TextBlock Text="How VoxStride sounds" FontWeight="SemiBold" FontSize="15" />
@@ -277,7 +298,14 @@
                     <TextBlock x:Name="ExtensionStatus" Margin="0,0,0,4" />
                     <CheckBox x:Name="UseMyBrowserBox" Content="Use my own browser when the extension is connected" Margin="0,2,0,4" />
                     <Button Content="Set up the browser extension…" Style="{StaticResource PlainButton}" HorizontalAlignment="Left" Click="SetupExtension_Click" Margin="0,0,0,8" />
-                    <CheckBox x:Name="NeverScreenshotBox" Content="Never take window screenshots (otherwise VoxStride asks each time it needs one)" Margin="0,8,0,4" />
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,4">
+                        <TextBlock Text="Looking at my screen" VerticalAlignment="Center" Width="150" />
+                        <ComboBox x:Name="ScreenPolicyBox" Width="360">
+                            <ComboBoxItem Content="Ask me each time" Tag="AskEachTime" />
+                            <ComboBoxItem Content="Whenever it needs to (pictures are never saved)" Tag="WhenNeeded" />
+                            <ComboBoxItem Content="Never" Tag="Never" />
+                        </ComboBox>
+                    </StackPanel>
                     <CheckBox x:Name="LogTextBox" Content="Include what I say and VoxStride's replies in the diagnostics log (kept only on this PC; helps fix recognition problems)" Margin="0,4" />
                     <Button Content="Save" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Margin="0,10,0,18" Click="SavePrivacy_Click" />
                     <TextBlock Text="Saved permissions" FontWeight="SemiBold" />

@@ -20,7 +20,7 @@ namespace VoxStride.Windows;
 /// moves the mouse; clicks also require the window to be where the screenshot saw it and the point not covered.</item>
 /// </list>
 /// </summary>
-public sealed class WindowsUiAutomation : IUiAutomation, IDisposable
+public sealed class WindowsUiAutomation : IUiAutomation, IScreenCapture, IDisposable
 {
     public static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(8);
     private readonly ConcurrentDictionary<string, DateTime> _startTimes = new(StringComparer.Ordinal);
@@ -424,6 +424,19 @@ public sealed class WindowsUiAutomation : IUiAutomation, IDisposable
         return new UiActionResult(true, Message: "Clicked.");
     }
 
+    /// <summary>One picture of the primary screen, scaled to at most 1280 px wide (for the screen_look tool).</summary>
+    public Task<ScreenShot?> CaptureScreenAsync(CancellationToken ct)
+    {
+        var (pixels, width, height) = UiNative.CapturePrimaryScreen();
+        if (pixels is null) return Task.FromResult<ScreenShot?>(null);
+        var scale = Math.Min(1.0, 1280.0 / width);
+        var (png, pw, ph) = Png.Encode(pixels, width, height, scale);
+        var fg = Native.GetForegroundWindow();
+        var title = fg == 0 ? null : Native.Title(fg);
+        Log.Info("ui", $"screen captured {width}x{height} -> {pw}x{ph} png={png.Length / 1024}KB");
+        return Task.FromResult<ScreenShot?>(new ScreenShot(png, "image/png", pw, ph, title));
+    }
+
     public void Dispose() { lock (_workerGate) _worker.Dispose(); }
 }
 
@@ -575,6 +588,34 @@ internal static class UiNative
             new INPUT { type = INPUT_MOUSE, u = new InputUnion { mi = new MOUSEINPUT { dwFlags = MOUSEEVENTF_LEFTUP } } },
         };
         SendInput(2, inputs, Marshal.SizeOf<INPUT>());
+    }
+
+    [DllImport("gdi32.dll")] private static extern bool BitBlt(nint dst, int x, int y, int w, int h, nint src, int sx, int sy, uint rop);
+    [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
+
+    /// <summary>The primary monitor as BGRA pixels (top-down), exactly what the user sees there.</summary>
+    public static (byte[]? Pixels, int Width, int Height) CapturePrimaryScreen()
+    {
+        int width = GetSystemMetrics(0 /* SM_CXSCREEN */), height = GetSystemMetrics(1 /* SM_CYSCREEN */);
+        if (width <= 0 || height <= 0) return (null, 0, 0);
+        var screen = GetDC(0);
+        var mem = CreateCompatibleDC(screen);
+        var bmp = CreateCompatibleBitmap(screen, width, height);
+        var old = SelectObject(mem, bmp);
+        try
+        {
+            if (!BitBlt(mem, 0, 0, width, height, screen, 0, 0, 0x00CC0020 /* SRCCOPY */)) return (null, 0, 0);
+            var bmi = new BITMAPINFO { biSize = Marshal.SizeOf<BITMAPINFO>(), biWidth = width, biHeight = -height, biPlanes = 1, biBitCount = 32 };
+            var bits = new byte[width * height * 4];
+            SelectObject(mem, old);
+            return (GetDIBits(mem, bmp, 0, (uint)height, bits, ref bmi, 0) == height ? bits : null, width, height);
+        }
+        finally
+        {
+            DeleteObject(bmp);
+            DeleteDC(mem);
+            ReleaseDC(0, screen);
+        }
     }
 
     /// <summary>Window pixels (BGRA, top-down) via PrintWindow, which works even when the window is partly covered.</summary>

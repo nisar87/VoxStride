@@ -11,6 +11,7 @@ using VoxStride.Core.Agent;
 using VoxStride.Core.Events;
 using VoxStride.Core.Execution;
 using VoxStride.Core.Files;
+using VoxStride.Core.Live;
 using VoxStride.Core.Policy;
 using VoxStride.Core.Routing;
 using VoxStride.Core.Tools;
@@ -125,6 +126,9 @@ public sealed class AppHost : IAsyncDisposable
     /// <summary>UI Automation tools' shared state (recent observations/screenshots).</summary>
     public UiSession Ui { get; }
     public IUserApproval Approvals { get; }
+    /// <summary>Approvals for live conversation runs: reversible requests go ahead, irreversible ones ask for a spoken yes.</summary>
+    public LiveApproval LiveApprovals { get; }
+    public CompanionMemory Memory { get; } = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VoxStride", "memory.json"));
 
     public AppHost(AppSettings settings, IUserApproval approvals, bool enableSpeech)
     {
@@ -157,9 +161,12 @@ public sealed class AppHost : IAsyncDisposable
             .Add(new ListWindowsTool(Ui)).Add(new FocusWindowTool(Ui)).Add(new ObserveUiTool(Ui)).Add(new InvokeUiTool(Ui))
             .Add(new SetValueUiTool(Ui)).Add(new TypeTextUiTool(Ui)).Add(new CaptureWindowTool(Ui)).Add(new ClickUiTool(Ui))
             .Add(new WebObserveTool(Web)).Add(new WebSearchTool(Web)).Add(new WebClickTool(Web)).Add(new WebFillTool(Web)).Add(new WebBackTool(Web))
-            .Add(new BrowserOpenUrlTool(Browser, Permissions, Web)).Add(new YouTubePlayTool(Browser)).Add(new ChatGptDraftTool(Browser));
+            .Add(new BrowserOpenUrlTool(Browser, Permissions, Web)).Add(new YouTubePlayTool(Browser)).Add(new ChatGptDraftTool(Browser))
+            .Add(new CreateDocumentTool(Scope, new ShellFileOpener(Scope))).Add(new ScreenLookTool(UiAutomation, () => Permissions))
+            .Add(new RememberTool(Memory)).Add(new ForgetTool(Memory));
 
-        Broker = new ToolBroker(Registry, Authority, Store, approvals, Rules, Events, time);
+        LiveApprovals = new LiveApproval(approvals, time);
+        Broker = new ToolBroker(Registry, Authority, Store, LiveApprovals, Rules, Events, time);
         Providers = new ProviderSelector(settings, Secrets, Store);
 
         if (enableSpeech)
@@ -253,6 +260,32 @@ public sealed class AppHost : IAsyncDisposable
         Log.Info("speech", $"speech engine change requested: {SpeechEngineLabel} -> {label}");
         SpeechEngineLabel = label;
         await Recognizer.ReplaceAsync(next);
+    }
+
+    /// <summary>True when a real-time conversation is possible (a Gemini key is saved).</summary>
+    public bool CanTalkLive => Secrets.Load(ProviderSelector.SecretName(ProviderKind.Gemini)) is { Length: > 0 };
+
+    /// <summary>
+    /// Builds the real-time companion (Gemini Live). Each call creates a fresh companion with the current settings,
+    /// key and memory; the caller owns and disposes it.
+    /// </summary>
+    public LiveCompanion? CreateCompanion()
+    {
+        var key = Secrets.Load(ProviderSelector.SecretName(ProviderKind.Gemini));
+        if (string.IsNullOrEmpty(key)) { Log.Info("live", "no Gemini key: live conversation unavailable"); return null; }
+        ILiveAudioOut speaker;
+        try { speaker = new WaveOutStream(); }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException) { Log.Error("live", "no speaker output", ex); return null; }
+        var options = new LiveOptions
+        {
+            Voice = GeminiVoice.NormalizeVoice(Settings.CloudVoiceName),
+            HalfDuplex = Settings.LiveUsingSpeakers,
+            UserName = Settings.UserName,
+            Personality = Settings.CompanionPersonality,
+            Memory = Memory.AsPrompt,
+        };
+        Log.Info("live", $"companion configured voice={options.Voice} halfDuplex={options.HalfDuplex} tools={Registry.Definitions.Count} memoryFacts={Memory.All().Count}");
+        return new LiveCompanion(() => new GeminiLiveTransport(key), Microphone, speaker, Registry, Broker, Authority, LiveApprovals, Speech, options, TimeProvider.System);
     }
 
     public sealed record SpeechTestResult(string Engine, string Device, long Buffers, double Peak, string Heard, IReadOnlyList<string> Problems);
@@ -374,6 +407,7 @@ public sealed class AppHost : IAsyncDisposable
         if (other is not null && _yieldedTo is null)
         {
             _yieldedTo = other;
+            MicYieldChanged?.Invoke(other);
             await StopWakeAsync();
             Log.Info("mic", $"yielding: {other} is using the microphone; wake word paused");
             Events.Publish(Guid.Empty, AgentState.Standby, "wake-unavailable", $"{other} is using the microphone, so I've stopped listening for \"Hey VoxStride\" until it's done. Ctrl+Alt+V still works.", canCancel: false);
@@ -382,14 +416,25 @@ public sealed class AppHost : IAsyncDisposable
         {
             Log.Info("mic", "microphone free again; wake word resumes" + (_conversationIdle ? "" : " after the current instruction"));
             _yieldedTo = null;
+            MicYieldChanged?.Invoke(null);
             if (_conversationIdle) await StartWakeAsync();
         }
     }, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
 
     public void SetConversationIdle(bool idle) => _conversationIdle = idle;
 
+    /// <summary>Another app (Teams, Zoom…) started (name) or stopped (null) using the microphone.</summary>
+    public event Action<string?>? MicYieldChanged;
+
+    /// <summary>The live companion owns the conversation while it runs, so the classic wake listener stays off.</summary>
+    public bool LiveActive { get; set; }
+
+    /// <summary>When set, "Hey VoxStride" starts the live companion instead of classic dictation.</summary>
+    public Func<string?, bool>? WakeToLive { get; set; }
+
     public async Task StartWakeAsync()
     {
+        if (LiveActive) { Log.Debug("wake", "wake not started: live conversation is running"); return; }
         if (!Settings.WakeWordEnabled || !Settings.MicrophoneConsent || Recognizer.Current is NullRecognizer) { Log.Debug("wake", $"wake not started (enabled={Settings.WakeWordEnabled}, micConsent={Settings.MicrophoneConsent}, speech={Recognizer.Current is not NullRecognizer})"); return; }
         if (_yieldedTo is not null) { Log.Debug("wake", $"wake not started: {_yieldedTo} is using the microphone"); return; } // another app is using the microphone
         try
@@ -415,6 +460,17 @@ public sealed class AppHost : IAsyncDisposable
             if (Speech is { } sp && (sp.IsSpeaking || DateTimeOffset.UtcNow - sp.LastSpeechEnded < TimeSpan.FromMilliseconds(700)))
             {
                 Log.Info("wake", "wake phrase ignored: VoxStride itself was speaking");
+                return;
+            }
+            if (WakeToLive is { } live)
+            {
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(30);
+                    var said = Interlocked.Exchange(ref trailing, null);
+                    await w.StopAsync();
+                    if (!live(said)) Conversation.ActivateFromWake(said); // live unavailable: classic dictation
+                });
                 return;
             }
             var handover = Microphone.Position;

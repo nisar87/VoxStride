@@ -97,7 +97,7 @@ public partial class SetupWizard : Window
         s.DisabledKnownFolders = _folders.Where(p => p.Value.IsChecked != true).Select(p => p.Key.ToString()).ToList();
         s.WakeWordEnabled = WakeBox.IsChecked == true;
         s.YieldMicToOtherApps = YieldBox.IsChecked == true;
-        s.ScreenCapture = ScreenBox.IsChecked == true ? ScreenCapturePolicy.Never : ScreenCapturePolicy.AskEachTime;
+        s.ScreenCapture = ScreenBox.IsChecked == true ? ScreenCapturePolicy.Never : s.ScreenCapture == ScreenCapturePolicy.Never ? ScreenCapturePolicy.AskEachTime : s.ScreenCapture;
         s.LaunchAtLogon = StartupBox.IsChecked == true;
         s.LogConversationText = LogTextBox.IsChecked == true;
         Log.IncludeContent = s.LogConversationText;

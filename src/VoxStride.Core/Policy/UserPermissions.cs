@@ -1,6 +1,7 @@
 namespace VoxStride.Core.Policy;
 
-public enum ScreenCapturePolicy { AskEachTime, Never }
+/// <summary>AskEachTime: approve every screenshot. WhenNeeded: VoxStride may look whenever it needs to (owner choice for live conversation). Never: off.</summary>
+public enum ScreenCapturePolicy { AskEachTime, Never, WhenNeeded }
 
 /// <summary>
 /// The user's own permission choices (Settings › Permissions), consulted by tools on top of VoxStride's fixed safety

@@ -22,6 +22,7 @@ public partial class App : Application
     private readonly AssistantViewModel _vm = new();
     private DispatcherTimer? _elapsedTimer;
     private bool _muted;
+    private bool _resumeLiveAfterUnlock;
     private readonly UpdateService _updates = new();
     private DispatcherTimer? _updateTimer;
     public Core.Updates.UpdateInfo? AvailableUpdate { get; private set; }
@@ -90,9 +91,11 @@ public partial class App : Application
         try { Log.Info("app", "environment\n" + DiagnosticsReport.Environment(Settings, Host)); } catch (Exception ex) { Log.Warn("app", "environment report failed", ex); }
         Log.Info("app", $"startup complete in {startup.ElapsedMilliseconds} ms");
         StartHealthLog();
+        SetUpCompanion();
 
         var background = e.Args.Contains("--background") && Settings.FirstRunCompleted;
-        if (!background) _main.Show();
+        var companionIsTheUi = Settings.LiveMode && Host.CanTalkLive && Settings.FirstRunCompleted && Settings.CompanionVisible;
+        if (!background && !companionIsTheUi) _main.Show();
         if (!Settings.FirstRunCompleted) _ = Dispatcher.BeginInvoke(ShowSetup); // after startup finishes, never blocking it
         if (e.Args.Contains("--updated")) _vm.AddActivity($"VoxStride was updated to version {UpdateService.CurrentVersion.ToString(3)}.", "✔");
         if (Settings.ActiveProvider is not null && !Settings.CloudSpeechConsent && Settings.MicrophoneConsent)
@@ -355,6 +358,7 @@ public partial class App : Application
         Log.Info("ui", $"microphone {(_muted ? "muted" : "unmuted")} by user");
         Host.Conversation.SetMuted(_muted);
         _overlay?.SetMuted(_muted);
+        if (Companion is { IsOn: true } live) { live.SetMicMuted(_muted); _companionWindow?.Attach(live); }
         if (_muted) _ = Host.StopWakeAsync(); else _ = Host.StartWakeAsync();
         if (_tray is not null) _tray.Text = _muted ? "VoxStride (muted)" : "VoxStride";
     }
@@ -384,6 +388,7 @@ public partial class App : Application
         menu.Items.Add("Stop  (Ctrl+Alt+X)", null, (_, _) => Dispatcher.Invoke(() => { Log.Info("ui", "tray: stop"); Host?.Conversation.PressCancel(); }));
         menu.Items.Add("Mute / unmute  (Ctrl+Alt+M)", null, (_, _) => Dispatcher.Invoke(ToggleMute));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        menu.Items.Add("Show companion", null, (_, _) => Dispatcher.Invoke(ShowCompanion));
         menu.Items.Add("Open VoxStride", null, (_, _) => Dispatcher.Invoke(() => ShowMain()));
         menu.Items.Add("History", null, (_, _) => Dispatcher.Invoke(() => ShowMain(1)));
         menu.Items.Add("Settings", null, (_, _) => Dispatcher.Invoke(() => ShowMain(2)));
@@ -401,6 +406,7 @@ public partial class App : Application
         UnregisterHotkeys();
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        await StopCompanionAsync("exiting");
         if (Host is not null) await Host.DisposeAsync();
         try { _singleInstance?.ReleaseMutex(); } catch (ApplicationException) { }
         Log.Info("app", "===== VoxStride stopped =====");
@@ -441,6 +447,7 @@ public partial class App : Application
         Log.Info("hotkey", wParam.ToInt32() switch { HK_TALK => "Ctrl+Alt+V (talk)", HK_STOP => "Ctrl+Alt+X (stop)", HK_MUTE => "Ctrl+Alt+M (mute)", HK_PAUSE => "Ctrl+Alt+P (pause)", _ => "unknown" } + " pressed");
         switch (wParam.ToInt32())
         {
+            case var live when LiveHotkey(live): break;
             case HK_TALK: if (Settings.TalkKey == TalkKeyMode.Hold && !_vm.IsListening) StartHoldToTalk(); else TalkOrProceed(); break;
             case HK_PAUSE: TogglePause(); break;
             case HK_STOP: Host?.Conversation.PressCancel(); break;
@@ -457,15 +464,19 @@ public partial class App : Application
         {
             Host?.Conversation.SetSessionLocked(true);
             _ = Host?.StopWakeAsync();
+            if (Companion is { IsOn: true }) { _resumeLiveAfterUnlock = true; _ = StopCompanionAsync("screen locked"); }
         }
         else if (e.Reason is SessionSwitchReason.SessionUnlock or SessionSwitchReason.ConsoleConnect or SessionSwitchReason.RemoteConnect)
+        {
             Host?.Conversation.SetSessionLocked(false);
+            if (_resumeLiveAfterUnlock) { _resumeLiveAfterUnlock = false; _ = Dispatcher.BeginInvoke(StartCompanionAsync); }
+        }
     }
 
     private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
     {
         Log.Info("app", "power: " + e.Mode);
-        if (e.Mode == PowerModes.Suspend) { Host?.Conversation.SetSessionLocked(true); _ = Host?.StopWakeAsync(); }
+        if (e.Mode == PowerModes.Suspend) { Host?.Conversation.SetSessionLocked(true); _ = Host?.StopWakeAsync(); if (Companion is { IsOn: true }) { _resumeLiveAfterUnlock = true; _ = StopCompanionAsync("sleep"); } }
         else if (e.Mode == PowerModes.Resume) Host?.Conversation.SetSessionLocked(false);
     }
 

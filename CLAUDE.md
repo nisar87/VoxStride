@@ -3,7 +3,8 @@
 Full contract: [docs/VoxStride_Master_Implementation_Plan.md](docs/VoxStride_Master_Implementation_Plan.md). Status: [docs/progress.md](docs/progress.md). Traceability: [docs/traceability.md](docs/traceability.md).
 
 ## Non-negotiables
-- Nothing executes before an explicit commit (finish phrase, Proceed button, push-to-talk release or typed Enter). Silence, VAD, timeouts and reconnects never commit.
+- Classic mode: nothing executes before an explicit commit (finish phrase, Proceed button, push-to-talk release or typed Enter). Silence, VAD, timeouts and reconnects never commit.
+- Live companion mode (owner decision 2026-11-28, "no proceed, talk like a person"): the user's own transcribed words (or typed text) in that turn authorize the actions they asked for. With no user words, only read-only tools run. Reversible changes go ahead. Irreversible ones (delete/recycle, permanent cleanup, Send/Pay/Submit, form submit, coordinate clicks) still need a spoken "yes" or a click. Silence and reconnects never trigger anything. See ADR-0013.
 - Every OS effect goes through `ToolBroker` (auth generation → schema → allowed tool → risk → validation → approval → journal → recheck → execute → verify → journal). Models never authorize anything.
 - No arbitrary shell, PowerShell, registry writes, process killing, unrestricted HTTP or script execution tools.
 - Deterministic local paths first (`IntentRouter`); cloud reasoning only when needed. Claude, Gemini and OpenAI are interchangeable through `IReasoningProvider`.

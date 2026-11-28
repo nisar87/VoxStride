@@ -51,6 +51,20 @@ public sealed class AppSettings
     public bool YieldMicToOtherApps { get; set; } = true;
     /// <summary>A sentence that is only "proceed", "execute", "go ahead" or "do it" finishes the instruction. On by default (owner feedback 0.7.4).</summary>
     public bool AllowPlainProceed { get; set; } = true;
+
+    // ---- Live companion (real-time conversation, owner decision 2026-11-28) ----
+    /// <summary>Talk in real time with the on-screen companion (needs a Gemini key). On by default.</summary>
+    public bool LiveMode { get; set; } = true;
+    /// <summary>Start the conversation (microphone on) as soon as VoxStride starts.</summary>
+    public bool LiveStartListening { get; set; } = true;
+    /// <summary>Using speakers rather than a headset: VoxStride stops listening while it talks so it doesn't hear itself.</summary>
+    public bool LiveUsingSpeakers { get; set; }
+    public bool CompanionVisible { get; set; } = true;
+    public double CompanionLeft { get; set; } = double.NaN;
+    public double CompanionTop { get; set; } = double.NaN;
+    public double CompanionScale { get; set; } = 1.0;
+    public string? UserName { get; set; }
+    public string? CompanionPersonality { get; set; }
     public int InactivityReminderSeconds { get; set; } = 30;
     public int InactivityDiscardSeconds { get; set; } = 120;
     public bool RetainTranscripts { get; set; }
@@ -109,7 +123,8 @@ public sealed class AppSettings
     public Dictionary<string, string> Snapshot()
     {
         var d = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (k, v) in JsonSerializer.SerializeToNode(this, Json)!.AsObject()) d[k] = v?.ToJsonString() ?? "null";
+        foreach (var (k, v) in JsonSerializer.SerializeToNode(this, Json)!.AsObject())
+            d[k] = k is nameof(UserName) or nameof(CompanionPersonality) ? (v is null ? "null" : "(set, not logged)") : v?.ToJsonString() ?? "null"; // personal text stays out of the log
         return d;
     }
 

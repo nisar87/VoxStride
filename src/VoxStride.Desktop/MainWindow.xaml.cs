@@ -211,7 +211,11 @@ public partial class MainWindow : Window
         ExtraFoldersList.ItemsSource = s.AllowedFolders.ToList();
         BlockedAppsBox.Text = string.Join(Environment.NewLine, s.BlockedApps);
         BlockedSitesBox.Text = string.Join(Environment.NewLine, s.BlockedSites);
-        NeverScreenshotBox.IsChecked = s.ScreenCapture == VoxStride.Core.Policy.ScreenCapturePolicy.Never;
+        ScreenPolicyBox.SelectedItem = ScreenPolicyBox.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == s.ScreenCapture.ToString()) ?? ScreenPolicyBox.Items[0];
+        LiveModeBox.IsChecked = s.LiveMode; LiveStartBox.IsChecked = s.LiveStartListening; LiveSpeakersBox.IsChecked = s.LiveUsingSpeakers;
+        UserNameBox.Text = s.UserName ?? ""; PersonalityBox.Text = s.CompanionPersonality ?? "";
+        var facts = _app.Host?.Memory.All().Count ?? 0;
+        MemoryCountText.Text = facts == 0 ? "VoxStride doesn't remember anything about you yet." : $"VoxStride remembers {facts} thing(s) you told it (kept only on this PC).";
         UseMyBrowserBox.IsChecked = s.UseMyBrowser;
         RefreshExtensionStatus();
         MicConsentBox.IsChecked = s.MicrophoneConsent; RetainBox.IsChecked = s.RetainTranscripts; StartupBox.IsChecked = s.LaunchAtLogon; LogTextBox.IsChecked = s.LogConversationText;
@@ -329,6 +333,10 @@ public partial class MainWindow : Window
         var s = _app.Settings;
         var wakeChanged = s.WakeWordEnabled != (WakeBox.IsChecked == true);
         s.WakeWordEnabled = WakeBox.IsChecked == true; s.YieldMicToOtherApps = YieldBox.IsChecked == true; s.AllowPlainProceed = PlainProceedBox.IsChecked == true;
+        var liveBefore = (s.LiveMode, s.LiveUsingSpeakers, s.UserName, s.CompanionPersonality, s.CloudVoiceName);
+        s.LiveMode = LiveModeBox.IsChecked == true; s.LiveStartListening = LiveStartBox.IsChecked == true; s.LiveUsingSpeakers = LiveSpeakersBox.IsChecked == true;
+        s.UserName = UserNameBox.Text.Trim() is { Length: > 0 } un ? un : null;
+        s.CompanionPersonality = PersonalityBox.Text.Trim() is { Length: > 0 } pe ? pe : null;
         s.SpeakResults = SpeakBox.IsChecked == true; s.AudioCues = CuesBox.IsChecked == true; s.ShowOverlay = OverlayBox.IsChecked == true;
         if (VoiceBox.SelectedItem is string v) s.Voice = v;
         if (TalkKeyBox.SelectedItem is ComboBoxItem { Tag: string tk }) s.TalkKey = Enum.Parse<TalkKeyMode>(tk);
@@ -359,7 +367,21 @@ public partial class MainWindow : Window
         if (_app.Host!.Speech is { } sp) { sp.Enabled = s.SpeakResults; sp.CuesEnabled = s.AudioCues; }
         if (wakeChanged) { if (s.WakeWordEnabled) await _app.Host.StartWakeAsync(); else await _app.Host.StopWakeAsync(); }
         _app.ApplyOverlayVisibility();
-        _vm.AddActivity("Voice settings saved. Language, voice and finish-phrase changes apply after restart.");
+        if (liveBefore != (s.LiveMode, s.LiveUsingSpeakers, s.UserName, s.CompanionPersonality, s.CloudVoiceName))
+        {
+            if (!s.LiveMode) await _app.StopCompanionAsync("live mode turned off");
+            else if (_app.Companion is { IsOn: true }) await _app.RestartCompanionAsync(); // new voice, name or personality
+            else if (!liveBefore.LiveMode) { _app.ShowCompanion(); await _app.StartCompanionAsync(); }
+        }
+        _vm.AddActivity("Voice settings saved.");
+    }
+
+    private void ForgetMemory_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageBox.Show(this, "Forget everything you asked VoxStride to remember?", "VoxStride", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        _app.Host?.Memory.Clear();
+        MemoryCountText.Text = "VoxStride doesn't remember anything about you yet.";
+        Log.Info("memory", "all remembered facts cleared by the user");
     }
 
     /// <summary>A new OpenAI or Gemini key can enable cloud speech straight away; no restart needed.</summary>
@@ -370,6 +392,11 @@ public partial class MainWindow : Window
             var before = _app.Host!.SpeechEngineLabel;
             await _app.Host.RefreshSpeechEngineAsync();
             _app.Host.RefreshVoice(); // a Gemini or OpenAI key also enables the natural voice
+            if (_app.Settings.LiveMode && _app.Host.CanTalkLive && _app.Companion is not { IsOn: true })
+            {
+                _app.ShowCompanion();
+                await _app.StartCompanionAsync(); // a new Gemini key: talk in real time straight away
+            }
             if (_app.Host.SpeechEngineLabel != before) _vm.AddActivity($"Speech engine is now {_app.Host.SpeechEngineLabel}.");
             LoadSettingsIntoUi();
         }
@@ -529,7 +556,7 @@ public partial class MainWindow : Window
         s.AllowedFolders = ExtraFoldersList.Items.OfType<string>().ToList();
         s.BlockedApps = Lines(BlockedAppsBox.Text);
         s.BlockedSites = Lines(BlockedSitesBox.Text).Select(VoxStride.Core.Policy.UserPermissions.Normalize).Where(x => x.Length > 0).Distinct().ToList();
-        s.ScreenCapture = NeverScreenshotBox.IsChecked == true ? VoxStride.Core.Policy.ScreenCapturePolicy.Never : VoxStride.Core.Policy.ScreenCapturePolicy.AskEachTime;
+        if (ScreenPolicyBox.SelectedItem is ComboBoxItem { Tag: string sp }) s.ScreenCapture = Enum.Parse<VoxStride.Core.Policy.ScreenCapturePolicy>(sp);
         s.UseMyBrowser = UseMyBrowserBox.IsChecked == true;
         s.Save();
         _app.Host!.Store.RetainTranscripts = s.RetainTranscripts;
