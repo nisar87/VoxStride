@@ -57,9 +57,9 @@ public sealed class LiveApproval(IUserApproval inner, TimeProvider time) : IUser
         }
 
         var voice = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Asking?.Invoke(request); // show and say the question first, so the companion is visibly asking before we listen for the answer
         lock (_gate) { _voice?.TrySetResult(false); _voice = voice; }
         using var both = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        Asking?.Invoke(request);
         Log.Info("approval", $"live question for {request.Operation}: {request.Title}");
         var click = inner.RequestAsync(request, both.Token);
         var first = await Task.WhenAny(click, voice.Task, Task.Delay(TimeSpan.FromMinutes(2), ct)).ConfigureAwait(false);
