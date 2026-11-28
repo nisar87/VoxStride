@@ -42,6 +42,7 @@ Raw evidence: [benchmarks/2026-11-27-ci-installed-build.json](benchmarks/2026-11
 | P4 desktop control | **Verified (CI desktop)** | UIA worker with timeouts (ADR-0010): windows/focus/observe/invoke/set value/type, consented capture plus click with vision input to all providers. Gate 100/100 per class; hung-app timeout; stale-id refusal. Notepad adapter verified. |
 | P5 browser | **Verified (fixtures + real Edge)** | Generic observe/search/click/fill/back; YouTube "Nth in top row" across 1–4 columns, ads and resize; ChatGPT draft-only; MV3 extension + native host + pipe (ADR-0011) verified end to end in real Edge on CI. |
 | P6 UX/hardening | **Implemented; partly verified** | 4-step setup, permissions (folders/apps/sites/screenshots), pause/resume, backup provider, diagnostics log with redaction and report export, in-app updates with SHA-256 verification, installer with host registration. |
+| Live companion (owner-approved scope, 2026-11-28) | **Implemented; logic verified** | Gemini Live transport and codec, `LiveCompanion` (authorization from the user's own words, voice approvals, barge-in, VAD gating, resume), animated character and talk bar, document, screen and memory tools (ADR-0013). Live service behaviour needs the owner's key. |
 | P7 expansion | Not started (by design) | The spec allows P7 only after release gates, as separately approved scope. |
 
 ## Flagship scenarios (spec §18)

@@ -32,6 +32,23 @@ Under **Voice → How VoxStride sounds**, tick **Natural human-like voice** and 
 | "Search YouTube for lo-fi music and play the third video in the top row" | Needs a provider. Opens the VoxStride browser window (Microsoft Edge), skips ads and Shorts, and asks if the position is ambiguous. |
 | "Open ChatGPT and draft a prompt asking for a weekly meal plan" | Needs a provider. Types the prompt into ChatGPT **without sending it**. You review it and press Enter yourself. You sign in yourself the first time. |
 
+## 2a. Your desktop companion (live conversation)
+With a Gemini key, VoxStride appears as a character on your desktop and you just talk to it, like a call:
+- **Start**: it starts listening when VoxStride starts. Otherwise click the mic on its bar, press Ctrl+Alt+V, or say "Hey VoxStride".
+- **Talk normally.** It replies straight away, and you can interrupt it by talking. There's no "proceed".
+- **What the character shows**:
+  - Green headset lights and leaning in: it's hearing you.
+  - Amber lights and looking up: it's thinking or working.
+  - Blue lights and a moving mouth: it's talking.
+  - Red mic: muted.
+- **Type instead**: write in the bar and press Enter.
+- **Before anything that can't be undone** (deleting, sending, paying, submitting), it asks. Say "yes" or "no", or click.
+- **Screen**: it looks at your screen when you ask about something on it. Choose Ask each time, Whenever it needs to, or Never under Settings › Permissions.
+- **Memory**: say "remember that…" and "forget…". Settings › Voice › Forget everything clears it.
+- **Speakers instead of a headset**: right-click the character › "I'm using speakers" so it doesn't hear itself.
+- **Move or resize**: drag the character; resize with Ctrl + mouse wheel. Hide it from its menu, and bring it back from the tray icon › Show companion.
+- **Cost**: live conversation uses your Gemini account. The free tier has limits. Audio is sent only while you're speaking.
+
 ## 3a. Files anywhere you allow
 VoxStride can list, search, create folders, move, rename, copy and recycle files, but only inside the folders you allow. By default that's Desktop, Documents, Downloads, Pictures, Music and Videos. Add or remove folders under **Settings › Permissions**. Every change shows the exact list for approval first. "Undo that" puts things back. Deleting always goes to the Recycle Bin.
 
