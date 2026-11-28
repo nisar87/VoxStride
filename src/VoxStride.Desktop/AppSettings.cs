@@ -61,6 +61,9 @@ public sealed class AppSettings
     public bool LiveUsingSpeakers { get; set; }
     /// <summary>Let the companion glance at the screen now and then and comment (needs "Looking at my screen: whenever it needs to").</summary>
     public bool LiveScreenComments { get; set; }
+    /// <summary>Twitch co-host: read this channel's chat (anonymously) and react to viewers out loud.</summary>
+    public bool TwitchCoHost { get; set; }
+    public string? TwitchChannel { get; set; }
     public int LiveScreenCommentSeconds { get; set; } = 90;
     public bool CompanionVisible { get; set; } = true;
     /// <summary>Where the companion was last placed (null: bottom-right of the screen).</summary>

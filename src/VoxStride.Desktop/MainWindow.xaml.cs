@@ -213,6 +213,7 @@ public partial class MainWindow : Window
         BlockedSitesBox.Text = string.Join(Environment.NewLine, s.BlockedSites);
         ScreenPolicyBox.SelectedItem = ScreenPolicyBox.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == s.ScreenCapture.ToString()) ?? ScreenPolicyBox.Items[0];
         LiveModeBox.IsChecked = s.LiveMode; LiveStartBox.IsChecked = s.LiveStartListening; LiveSpeakersBox.IsChecked = s.LiveUsingSpeakers; LiveScreenBox.IsChecked = s.LiveScreenComments;
+        TwitchBox.IsChecked = s.TwitchCoHost; TwitchChannelBox.Text = s.TwitchChannel ?? "";
         UserNameBox.Text = s.UserName ?? ""; PersonalityBox.Text = s.CompanionPersonality ?? "";
         RefreshMemoryList();
         _ = RefreshLiveUsageAsync();
@@ -337,7 +338,12 @@ public partial class MainWindow : Window
         var wakeChanged = s.WakeWordEnabled != (WakeBox.IsChecked == true);
         s.WakeWordEnabled = WakeBox.IsChecked == true; s.YieldMicToOtherApps = YieldBox.IsChecked == true; s.AllowPlainProceed = PlainProceedBox.IsChecked == true;
         var characterBefore = s.CompanionCharacter;
-        var liveBefore = (s.LiveMode, s.LiveUsingSpeakers, s.UserName, s.CompanionPersonality, s.CloudVoiceName, s.LiveScreenComments);
+        var liveBefore = (s.LiveMode, s.LiveUsingSpeakers, s.UserName, s.CompanionPersonality, s.CloudVoiceName, s.LiveScreenComments, s.TwitchCoHost, s.TwitchChannel);
+        var channel = TwitchChannelBox.Text.Trim();
+        if (TwitchBox.IsChecked == true && !VoxStride.Core.Live.TwitchIrc.IsValidChannel(channel))
+        { MessageBox.Show(this, "Enter your Twitch channel name (letters, numbers and _ only).", "VoxStride"); return; }
+        s.TwitchCoHost = TwitchBox.IsChecked == true;
+        s.TwitchChannel = channel.Length > 0 ? VoxStride.Core.Live.TwitchIrc.NormalizeChannel(channel) : null;
         s.LiveScreenComments = LiveScreenBox.IsChecked == true;
         s.LiveMode = LiveModeBox.IsChecked == true; s.LiveStartListening = LiveStartBox.IsChecked == true; s.LiveUsingSpeakers = LiveSpeakersBox.IsChecked == true;
         s.UserName = UserNameBox.Text.Trim() is { Length: > 0 } un ? un : null;
@@ -377,7 +383,7 @@ public partial class MainWindow : Window
             await _app.ChooseCharacterAsync(ch.Id); // also sets its voice and restarts the conversation
             LoadSettingsIntoUi();
         }
-        else if (liveBefore != (s.LiveMode, s.LiveUsingSpeakers, s.UserName, s.CompanionPersonality, s.CloudVoiceName, s.LiveScreenComments))
+        else if (liveBefore != (s.LiveMode, s.LiveUsingSpeakers, s.UserName, s.CompanionPersonality, s.CloudVoiceName, s.LiveScreenComments, s.TwitchCoHost, s.TwitchChannel))
         {
             if (!s.LiveMode) await _app.StopCompanionAsync("live mode turned off");
             else if (_app.Companion is { IsOn: true }) await _app.RestartCompanionAsync(); // new voice, name or personality

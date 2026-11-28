@@ -13,6 +13,8 @@ public partial class App
     private CompanionWindow? _companionWindow;
     private bool _liveStarting;
     private bool _yieldMuted;
+    private TwitchChatClient? _twitch;
+    private System.Windows.Threading.DispatcherTimer? _twitchTimer;
 
     public LiveCompanion? Companion { get; private set; }
 
@@ -64,14 +66,39 @@ public partial class App
                 Host.LiveActive = false;
                 _ = Host.StartWakeAsync();
             }
-            else if (_muted) c.SetMicMuted(true);
+            else
+            {
+                if (_muted) c.SetMicMuted(true);
+                StartTwitch(c);
+            }
         }
         catch (Exception ex) { Log.Error("live", "starting the companion failed", ex); }
         finally { _liveStarting = false; }
     }
 
+    /// <summary>Starts the Twitch co-host if it's switched on: viewers' chat becomes untrusted context, never commands.</summary>
+    private void StartTwitch(LiveCompanion c)
+    {
+        if (!Settings.TwitchCoHost || !TwitchIrc.IsValidChannel(Settings.TwitchChannel)) return;
+        var host = new TwitchCoHost(() => c.IsQuiet, text => c.SendContextAsync(text), TimeProvider.System);
+        _twitch = new TwitchChatClient();
+        _twitch.Received += host.Add;
+        _twitch.ConnectionChanged += on => Dispatcher.BeginInvoke(() => _vm.AddActivity(on ? $"Co-hosting #{TwitchIrc.NormalizeChannel(Settings.TwitchChannel!)} on Twitch." : "Twitch chat disconnected; reconnecting…"));
+        _twitch.Start(Settings.TwitchChannel!);
+        _twitchTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _twitchTimer.Tick += async (_, _) => { try { await host.TickAsync(); } catch (Exception ex) { Log.Warn("twitch", "co-host tick failed", ex); } };
+        _twitchTimer.Start();
+    }
+
+    private async Task StopTwitchAsync()
+    {
+        _twitchTimer?.Stop(); _twitchTimer = null;
+        if (_twitch is not null) { await _twitch.DisposeAsync(); _twitch = null; }
+    }
+
     public async Task StopCompanionAsync(string reason)
     {
+        await StopTwitchAsync();
         if (Companion is null) return;
         var c = Companion;
         Companion = null;

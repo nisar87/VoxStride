@@ -222,6 +222,12 @@
                             <CheckBox x:Name="LiveModeBox" Content="Use live conversation with the on-screen character" Margin="0,4" />
                             <CheckBox x:Name="LiveStartBox" Content="Start listening as soon as VoxStride starts" Margin="0,4" />
                             <CheckBox x:Name="LiveSpeakersBox" Content="I use speakers, not a headset (you interrupt by speaking louder than its voice)" Margin="0,4" />
+                            <StackPanel Orientation="Horizontal" Margin="0,4">
+                                <CheckBox x:Name="TwitchBox" Content="Twitch co-host — react to my stream's chat out loud. Channel:" VerticalAlignment="Center" />
+                                <TextBox x:Name="TwitchChannelBox" Width="160" Margin="8,0,0,0" AutomationProperties.Name="Twitch channel" />
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource Caption}" Margin="22,0,0,4" TextWrapping="Wrap"
+                                       Text="Chat is read anonymously; VoxStride never posts. Viewers can't make it do anything on your PC." />
                             <CheckBox x:Name="LiveScreenBox" Content="Glance at my screen now and then and comment if something is interesting (needs &quot;Looking at my screen: whenever it needs to&quot; under Permissions)" Margin="0,4" />
                             <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                                 <TextBlock Text="Character" VerticalAlignment="Center" Width="110" />
