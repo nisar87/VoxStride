@@ -164,6 +164,10 @@ public partial class CompanionWindow : Window
 
     // ---------------- animation ----------------
 
+    /// <summary>Moves a value towards its target and snaps when close, so nothing redraws once it has settled.</summary>
+    private static double Ease(double current, double target, double rate, double snap = 0.05) =>
+        Math.Abs(target - current) < snap ? target : current + (target - current) * rate;
+
     private void Animate(object? sender, EventArgs e)
     {
         if (!IsVisible) return;
@@ -173,20 +177,20 @@ public partial class CompanionWindow : Window
         var t = (DateTime.UtcNow - _start).TotalSeconds;
         if (_forcedMouth is not null) { _blinkUntil = -1; _nextBlink = Math.Max(_nextBlink, t + 5); } // eyes open in snapshots
 
-        // breathing and a gentle sway
-        var breath = Math.Round(Math.Sin(t * 2 * Math.PI / 3.6) * 2.2, 1);
-        if (Math.Abs(breath - Breath.Y) >= 0.1) Breath.Y = breath; // only redraw when it visibly moves
+        // breathing and sway only while something is happening; at rest the character is still (cheap to draw)
+        var breath = busy ? Math.Round(Math.Sin(t * 2 * Math.PI / 3.6) * 2.2, 1) : 0;
+        Breath.Y = Ease(Breath.Y, breath, 0.5, 0.1);
         var tiltTarget = _state switch
         {
             CompanionState.Hearing => -5.0,                     // leaning in to listen
             CompanionState.Thinking or CompanionState.Working => 4.0,
-            CompanionState.Speaking => Math.Sin(t * 2.3) * 2.5,
-            _ => Math.Sin(t * 0.7) * 1.2,
+            CompanionState.Speaking => Math.Round(Math.Sin(t * 2.3) * 2.5, 1),
+            _ => 0.0,
         };
-        HeadTilt.Angle += (tiltTarget - HeadTilt.Angle) * (busy ? 0.15 : 0.3);
+        HeadTilt.Angle = Ease(HeadTilt.Angle, tiltTarget, busy ? 0.2 : 0.35, 0.1);
 
         // blinking
-        if (t >= _nextBlink) { _blinkUntil = t + 0.13; _nextBlink = t + 2.5 + _rng.NextDouble() * 3.5; if (_rng.NextDouble() < 0.15) _nextBlink = t + 0.3; }
+        if (t >= _nextBlink) { _blinkUntil = t + 0.15; _nextBlink = t + 2.5 + _rng.NextDouble() * 3.5; if (_rng.NextDouble() < 0.15) _nextBlink = t + 0.35; }
         var lid = t < _blinkUntil ? 0.12 : 1.0;
         BlinkL.ScaleY = lid; BlinkR.ScaleY = lid;
 
@@ -200,37 +204,37 @@ public partial class CompanionWindow : Window
                 var centre = Character.PointToScreen(new Point(120, 118));
                 var dx = p.X - centre.X; var dy = p.Y - centre.Y;
                 var d = Math.Max(1, Math.Sqrt(dx * dx + dy * dy));
-                lx = dx / d * Math.Min(3.5, d / 60); ly = dy / d * Math.Min(3, d / 60);
+                lx = Math.Round(dx / d * Math.Min(3.5, d / 60), 1); ly = Math.Round(dy / d * Math.Min(3, d / 60), 1);
             }
             catch (InvalidOperationException) { }
         }
-        LookL.X += (lx - LookL.X) * 0.2; LookL.Y += (ly - LookL.Y) * 0.2;
+        LookL.X = Ease(LookL.X, lx, 0.35, 0.1); LookL.Y = Ease(LookL.Y, ly, 0.35, 0.1);
         LookR.X = LookL.X; LookR.Y = LookL.Y;
 
         // eyebrows: raised when listening closely, one raised while thinking
-        var browTarget = _state switch { CompanionState.Hearing => -3.0, CompanionState.Listening => -1.0, _ => 0.0 };
-        BrowLUp.Y += (browTarget - BrowLUp.Y) * 0.15;
-        BrowRUp.Y += ((_state is CompanionState.Thinking ? -4.0 : browTarget) - BrowRUp.Y) * 0.15;
+        var browTarget = _state switch { CompanionState.Hearing => -3.0, _ => 0.0 };
+        BrowLUp.Y = Ease(BrowLUp.Y, browTarget, 0.3, 0.1);
+        BrowRUp.Y = Ease(BrowRUp.Y, _state is CompanionState.Thinking ? -4.0 : browTarget, 0.3, 0.1);
 
         // lip sync with VoxStride's own voice
         var level = _forcedMouth ?? (_state == CompanionState.Speaking || _companion?.OutputLevel > 0.02 ? _companion?.OutputLevel ?? 0 : 0);
-        _mouth = _forcedMouth ?? _mouth + (level - _mouth) * (level > _mouth ? 0.6 : 0.25);
+        _mouth = _forcedMouth ?? Ease(_mouth, level, level > _mouth ? 0.6 : 0.3, 0.02);
         if (_mouth > 0.04)
         {
             Smile.Visibility = Visibility.Collapsed;
             MouthOpen.Visibility = Visibility.Visible;
-            MouthOpen.Height = 3 + _mouth * 17;
-            MouthOpen.Width = 15 + _mouth * 7;
+            MouthOpen.Height = Math.Round(3 + _mouth * 17, 1);
+            MouthOpen.Width = Math.Round(15 + _mouth * 7, 1);
             Canvas.SetLeft(MouthOpen, 120 - MouthOpen.Width / 2);
-            Canvas.SetTop(MouthOpen, 149 - _mouth * 3);
+            Canvas.SetTop(MouthOpen, Math.Round(149 - _mouth * 3, 1));
         }
         else { Smile.Visibility = Visibility.Visible; MouthOpen.Visibility = Visibility.Collapsed; }
 
         // the mic ring and headset lights pulse with the user's voice
         var input = _companion is { IsOn: true, MicMuted: false } ? _companion.InputLevel : 0;
-        _micLevel += (input - _micLevel) * 0.3;
-        MicRing.Opacity = 0.25 + Math.Min(0.75, _micLevel * 3);
-        MicRing.Stroke = StatusDot.Fill;
+        _micLevel = Ease(_micLevel, input, 0.4, 0.01);
+        MicRing.Opacity = Math.Round(0.25 + Math.Min(0.75, _micLevel * 3), 2);
+        if (!ReferenceEquals(MicRing.Stroke, StatusDot.Fill)) MicRing.Stroke = StatusDot.Fill;
         var ledPulse = _state switch
         {
             CompanionState.Hearing => 0.6 + Math.Min(0.4, _micLevel * 4),
@@ -238,6 +242,7 @@ public partial class CompanionWindow : Window
             CompanionState.Speaking => 0.6 + _mouth * 0.4,
             _ => 0.9,
         };
+        ledPulse = Math.Round(ledPulse, 2);
         LedL.Opacity = ledPulse; LedR.Opacity = ledPulse;
 
         if (ThinkDots.Visibility == Visibility.Visible)
