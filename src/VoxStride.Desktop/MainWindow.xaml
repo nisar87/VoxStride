@@ -234,7 +234,7 @@
                         </ComboBox>
                     </StackPanel>
                     <CheckBox x:Name="NaturalBox" Content="Natural mode: a pause ends my turn for questions and lookups (changes still need &quot;VoxStride, execute&quot;)" Margin="0,4" />
-                    <CheckBox x:Name="PlainProceedBox" Content="Also accept a standalone &quot;Proceed&quot; to finish (less strict)" Margin="0,4" />
+                    <CheckBox x:Name="PlainProceedBox" Content="Saying just Content="Also accept a standalone &quot;Proceed&quot; to finish (less strict)"quot;ProceedContent="Also accept a standalone &quot;Proceed&quot; to finish (less strict)"quot; (or Content="Also accept a standalone &quot;Proceed&quot; to finish (less strict)"quot;ExecuteContent="Also accept a standalone &quot;Proceed&quot; to finish (less strict)"quot;, Content="Also accept a standalone &quot;Proceed&quot; to finish (less strict)"quot;Go aheadContent="Also accept a standalone &quot;Proceed&quot; to finish (less strict)"quot;) on its own finishes the instruction" Margin="0,4" />
                     <CheckBox x:Name="SpeakBox" Content="Speak results aloud" Margin="0,4" />
                     <CheckBox x:Name="CuesBox" Content="Play short sound cues" Margin="0,4" />
                     <CheckBox x:Name="OverlayBox" Content="Show the floating assistant" Margin="0,4" />

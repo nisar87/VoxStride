@@ -49,7 +49,8 @@ public sealed class AppSettings
     public bool WakeWordEnabled { get; set; } = true;
     /// <summary>Release the microphone (stop wake-word listening) while Teams, Zoom or any other app is using it.</summary>
     public bool YieldMicToOtherApps { get; set; } = true;
-    public bool AllowPlainProceed { get; set; }
+    /// <summary>A sentence that is only "proceed", "execute", "go ahead" or "do it" finishes the instruction. On by default (owner feedback 0.7.4).</summary>
+    public bool AllowPlainProceed { get; set; } = true;
     public int InactivityReminderSeconds { get; set; } = 30;
     public int InactivityDiscardSeconds { get; set; } = 120;
     public bool RetainTranscripts { get; set; }
