@@ -49,7 +49,7 @@ try {
   $result.companion = if (Test-Path $selfJson) { Get-Content $selfJson -Raw | ConvertFrom-Json } else { @{ status = 'missing' } }
   Write-Host '----- companion self-test -----'
   if (Test-Path $selfJson) { Get-Content $selfJson -Raw | Write-Host }
-  foreach ($png in 'companion-states.png', 'companion-live-asking.png') {
+  foreach ($png in 'companion-states.png', 'companion-characters.png') {
     $f = Join-Path $selfDir $png
     if (Test-Path $f) { Write-Host "BEGIN-PNG $png"; [Convert]::ToBase64String([IO.File]::ReadAllBytes($f)) -split '(.{1,4000})' | Where-Object { $_ } | ForEach-Object { Write-Host "PNG:$_" }; Write-Host "END-PNG $png" }
   }

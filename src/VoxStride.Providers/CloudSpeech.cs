@@ -177,8 +177,19 @@ public sealed class OpenAIVoice(string apiKey, string voice = "marin", string mo
 public sealed class GeminiVoice(string apiKey, string voice = GeminiVoice.DefaultVoice, Uri? baseUri = null, HttpMessageHandler? handler = null, IReadOnlyList<string>? models = null) : ICloudVoice
 {
     public const string DefaultVoice = "Sulafat";
-    /// <summary>Prebuilt Gemini voices (name — character).</summary>
-    public static readonly string[] Voices = ["Sulafat", "Achird", "Aoede", "Kore", "Leda", "Puck", "Zephyr", "Charon", "Fenrir", "Orus", "Callirrhoe", "Despina", "Gacrux", "Vindemiatrix", "Sadachbia", "Umbriel"];
+    /// <summary>All 30 prebuilt Gemini voices with Google's one-word character for each.</summary>
+    public static readonly IReadOnlyList<(string Name, string Style)> Catalogue =
+    [
+        ("Sulafat", "warm"), ("Achird", "friendly"), ("Aoede", "breezy"), ("Leda", "youthful"), ("Puck", "upbeat"), ("Zephyr", "bright"),
+        ("Kore", "firm"), ("Charon", "informative"), ("Fenrir", "excitable"), ("Orus", "firm"), ("Callirrhoe", "easy-going"), ("Autonoe", "bright"),
+        ("Enceladus", "breathy"), ("Iapetus", "clear"), ("Umbriel", "easy-going"), ("Algieba", "smooth"), ("Despina", "smooth"), ("Erinome", "clear"),
+        ("Algenib", "gravelly"), ("Rasalgethi", "informative"), ("Laomedeia", "upbeat"), ("Achernar", "soft"), ("Alnilam", "firm"), ("Schedar", "even"),
+        ("Gacrux", "mature"), ("Pulcherrima", "forward"), ("Zubenelgenubi", "casual"), ("Vindemiatrix", "gentle"), ("Sadachbia", "lively"), ("Sadaltager", "knowledgeable"),
+    ];
+
+    public static readonly string[] Voices = Catalogue.Select(v => v.Name).ToArray();
+
+    public static string Describe(string name) => Catalogue.FirstOrDefault(v => v.Name == name) is { Name: not null } v ? $"{v.Name} — {v.Style}" : name;
     private static readonly string[] DefaultModels = ["gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"];
     private readonly HttpClient _http = SpeechHttp.Client(handler);
     private readonly IReadOnlyList<string> _models = models ?? DefaultModels;

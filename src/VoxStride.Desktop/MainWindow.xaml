@@ -223,16 +223,26 @@
                             <CheckBox x:Name="LiveStartBox" Content="Start listening as soon as VoxStride starts" Margin="0,4" />
                             <CheckBox x:Name="LiveSpeakersBox" Content="I use speakers, not a headset (VoxStride pauses listening while it talks)" Margin="0,4" />
                             <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <TextBlock Text="Character" VerticalAlignment="Center" Width="110" />
+                                <ComboBox x:Name="CharacterBox" Width="260" AutomationProperties.Name="Character" />
+                                <Button Content="Use my own picture…" Style="{StaticResource PlainButton}" Margin="8,0,0,0" Click="CompanionPicture_Click" />
+                                <Button x:Name="RemovePictureButton" Content="Remove picture" Style="{StaticResource PlainButton}" Margin="6,0,0,0" Click="RemovePicture_Click" />
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource Caption}" Margin="110,2,0,0" Text="Each character has its own look, voice and personality. Your own personality text below replaces it." TextWrapping="Wrap" />
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                                 <TextBlock Text="Your name" VerticalAlignment="Center" Width="110" />
                                 <TextBox x:Name="UserNameBox" Width="260" AutomationProperties.Name="Your name" />
                             </StackPanel>
                             <TextBlock Text="VoxStride's personality (optional)" Margin="0,8,0,2" />
                             <TextBox x:Name="PersonalityBox" AcceptsReturn="True" Height="54" TextWrapping="Wrap" AutomationProperties.Name="Personality"
                                      ToolTip="For example: cheerful and funny, talks to me in Roman Urdu, keeps answers short" />
-                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                <TextBlock x:Name="MemoryCountText" VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <TextBlock x:Name="MemoryCountText" Margin="0,10,0,4" TextWrapping="Wrap" />
+                            <ListBox x:Name="MemoryList" Height="110" AutomationProperties.Name="Things VoxStride remembers" />
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <Button Content="Forget selected" Style="{StaticResource PlainButton}" Click="ForgetSelected_Click" Margin="0,0,8,0" />
                                 <Button Content="Forget everything" Style="{StaticResource PlainButton}" Click="ForgetMemory_Click" />
                             </StackPanel>
+                            <TextBlock x:Name="LiveUsageText" Style="{StaticResource Caption}" Margin="0,8,0,0" TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
                     <Border CornerRadius="10" Padding="14" Background="#10808080" Margin="0,0,0,14">

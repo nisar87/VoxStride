@@ -36,6 +36,7 @@ public partial class CompanionWindow : Window
         InitializeComponent();
         var s = app.Settings;
         ApplyScale(s.CompanionScale);
+        ApplyLook();
         Loaded += (_, _) => PlaceWindow();
         // Animation on a timer rather than every display frame: smooth while talking or listening closely, slow and cheap
         // while idle (CompositionTarget.Rendering kept the CPU busy even when nothing was happening).
@@ -47,6 +48,58 @@ public partial class CompanionWindow : Window
         PreviewMouseWheel += OnWheel;
         LocationChanged += (_, _) => { if (IsLoaded) { _app.Settings.CompanionLeft = Left; _app.Settings.CompanionTop = Top; } };
         ShowUnavailable();
+    }
+
+    // ---------------- look ----------------
+
+    /// <summary>Shows the chosen character, or the user's own picture when one is set.</summary>
+    public void ApplyLook()
+    {
+        var s = _app.Settings;
+        var picture = LoadPicture(s.CompanionImagePath);
+        PictureAvatar.Visibility = picture is null ? Visibility.Collapsed : Visibility.Visible;
+        Character.Visibility = picture is null ? Visibility.Visible : Visibility.Collapsed;
+        if (picture is not null) { PictureImage.Source = picture; return; }
+
+        var c = CompanionCharacters.Get(s.CompanionCharacter);
+        Resources["Skin"] = new SolidColorBrush(c.Skin);
+        Resources["SkinShade"] = new SolidColorBrush(c.SkinShade);
+        Resources["Iris"] = new SolidColorBrush(c.Iris);
+        Resources["Hair"] = new LinearGradientBrush(c.HairTop, c.HairBottom, 90);
+        Resources["Hoodie"] = new LinearGradientBrush(c.HoodieA, c.HoodieB, 45);
+        void Show(UIElement e, bool on) => e.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        Show(BackHairShort, c.Hair is HairStyle.Bangs or HairStyle.SideSwept or HairStyle.Spiky);
+        Show(BackHairLong, c.Hair is HairStyle.Long or HairStyle.LongWithBun);
+        Show(BackHairCrop, c.Hair is HairStyle.Crop);
+        Show(HairBun, c.Hair is HairStyle.LongWithBun);
+        Show(FringeBangs, c.Hair is HairStyle.Bangs or HairStyle.Long or HairStyle.LongWithBun);
+        Show(FringeSide, c.Hair is HairStyle.SideSwept);
+        Show(FringeSpiky, c.Hair is HairStyle.Spiky);
+        Show(FringeCrop, c.Hair is HairStyle.Crop);
+        Show(Glasses, c.Glasses);
+        Show(Beard, c.Beard);
+        Show(Freckles, c.Freckles);
+    }
+
+    private static System.Windows.Media.Imaging.BitmapImage? LoadPicture(string? path)
+    {
+        if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path)) return null;
+        try
+        {
+            var img = new System.Windows.Media.Imaging.BitmapImage();
+            img.BeginInit();
+            img.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad; // don't keep the file locked
+            img.UriSource = new Uri(path);
+            img.DecodePixelHeight = 600;
+            img.EndInit();
+            img.Freeze();
+            return img;
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or NotSupportedException or UriFormatException or ArgumentException)
+        {
+            Log.Warn("ui", "the companion picture couldn't be loaded; showing the drawn character", ex);
+            return null;
+        }
     }
 
     // ---------------- wiring ----------------
@@ -245,6 +298,15 @@ public partial class CompanionWindow : Window
         ledPulse = Math.Round(ledPulse, 2);
         LedL.Opacity = ledPulse; LedR.Opacity = ledPulse;
 
+        if (PictureAvatar.Visibility == Visibility.Visible)
+        {
+            PictureBreath.Y = Breath.Y;
+            var talk = Math.Round(1 + _mouth * 0.04, 3);
+            PictureTalk.ScaleY = talk; PictureTalk.ScaleX = Math.Round(1 + _mouth * 0.015, 3);
+            if (!ReferenceEquals(PictureGlow.Fill, StatusDot.Fill)) PictureGlow.Fill = StatusDot.Fill;
+            PictureGlow.Opacity = busy ? Math.Round(0.35 + ledPulse * 0.4, 2) : 0.45;
+        }
+
         if (ThinkDots.Visibility == Visibility.Visible)
         {
             Dot1.Opacity = 0.3 + 0.7 * Math.Max(0, Math.Sin(t * 5));
@@ -278,6 +340,18 @@ public partial class CompanionWindow : Window
             _app.Settings.LiveUsingSpeakers = !_app.Settings.LiveUsingSpeakers; _app.Settings.Save();
             if (on) _ = _app.RestartCompanionAsync();
         });
+        var chars = new MenuItem { Header = "Character" };
+        foreach (var ch in CompanionCharacters.All)
+        {
+            var item = new MenuItem { Header = ch.ToString(), IsChecked = _app.Settings.CompanionImagePath is null && _app.Settings.CompanionCharacter == ch.Id };
+            item.Click += (_, _) => _ = _app.ChooseCharacterAsync(ch.Id);
+            chars.Items.Add(item);
+        }
+        chars.Items.Add(new Separator());
+        var pic = new MenuItem { Header = "Use my own picture…" };
+        pic.Click += (_, _) => _ = _app.ChooseCompanionPictureAsync();
+        chars.Items.Add(pic);
+        menu.Items.Add(chars);
         menu.Items.Add(new Separator());
         Add("Bigger", () => ApplyScale(_app.Settings.CompanionScale + 0.15, save: true));
         Add("Smaller", () => ApplyScale(_app.Settings.CompanionScale - 0.15, save: true));

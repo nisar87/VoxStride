@@ -31,6 +31,8 @@ public sealed record LiveToolCancel(IReadOnlyList<string> Ids) : LiveServerEvent
 public sealed record LiveGoAway(TimeSpan? TimeLeft) : LiveServerEvent;
 public sealed record LiveResumeHandle(string Handle) : LiveServerEvent;
 public sealed record LiveClosed(string Reason, bool IsError) : LiveServerEvent;
+/// <summary>Tokens the service reports for a response (audio, text and images all count).</summary>
+public sealed record LiveUsage(long InputTokens, long OutputTokens) : LiveServerEvent;
 
 /// <summary>A bidirectional real-time voice connection (one session).</summary>
 public interface ILiveTransport : IAsyncDisposable

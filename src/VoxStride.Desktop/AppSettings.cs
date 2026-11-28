@@ -65,6 +65,10 @@ public sealed class AppSettings
     public double? CompanionTop { get; set; }
     public double CompanionScale { get; set; } = 1.0;
     public string? UserName { get; set; }
+    /// <summary>Which of VoxStride's characters is shown (see CompanionCharacters).</summary>
+    public string CompanionCharacter { get; set; } = "nova";
+    /// <summary>The user's own picture, copied into VoxStride's folder, shown instead of a drawn character.</summary>
+    public string? CompanionImagePath { get; set; }
     public string? CompanionPersonality { get; set; }
     public int InactivityReminderSeconds { get; set; } = 30;
     public int InactivityDiscardSeconds { get; set; } = 120;
@@ -125,7 +129,7 @@ public sealed class AppSettings
     {
         var d = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (k, v) in JsonSerializer.SerializeToNode(this, Json)!.AsObject())
-            d[k] = k is nameof(UserName) or nameof(CompanionPersonality) ? (v is null ? "null" : "(set, not logged)") : v?.ToJsonString() ?? "null"; // personal text stays out of the log
+            d[k] = k is nameof(UserName) or nameof(CompanionPersonality) or nameof(CompanionImagePath) ? (v is null ? "null" : "(set, not logged)") : v?.ToJsonString() ?? "null"; // personal text stays out of the log
         return d;
     }
 

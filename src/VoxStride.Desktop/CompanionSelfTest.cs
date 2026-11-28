@@ -106,6 +106,27 @@ public partial class App
             Save(sheet, Path.Combine(outDir, "companion-states.png"));
             Check("rendered-states", frames.All(f => f.PixelWidth > 100 && f.PixelHeight > 200), $"{frames.Count} states, {frames[0].PixelWidth}x{frames[0].PixelHeight}");
 
+            // Every character, plus the user's own picture.
+            var looks = new List<BitmapSource>();
+            var lookNames = new List<string>();
+            foreach (var ch in CompanionCharacters.All)
+            {
+                Settings.CompanionCharacter = ch.Id; Settings.CompanionImagePath = null;
+                window.ApplyLook();
+                looks.Add(window.Snapshot(CompanionState.Speaking, 0.45, null, false));
+                lookNames.Add(ch.Name + " · " + ch.Voice);
+            }
+            var picturePath = Path.Combine(outDir, "test-picture.png");
+            Save(TestPicture(), picturePath);
+            Settings.CompanionImagePath = picturePath;
+            window.ApplyLook();
+            looks.Add(window.Snapshot(CompanionState.Hearing, 0, null, false));
+            lookNames.Add("Your own picture");
+            Settings.CompanionImagePath = null; Settings.CompanionCharacter = "nova";
+            window.ApplyLook();
+            Save(Combine(looks, lookNames.ToArray()), Path.Combine(outDir, "companion-characters.png"));
+            Check("characters", looks.Count == CompanionCharacters.All.Count + 1 && CompanionCharacters.All.Select(c => c.Voice).Distinct().Count() == CompanionCharacters.All.Count, $"{CompanionCharacters.All.Count} characters with distinct voices + picture avatar");
+
             // 2) A scripted conversation through the real app.
             var transport = new ScriptedLiveTransport();
             var hub = new AudioHub(() => new SilentMic());
@@ -221,6 +242,24 @@ public partial class App
             b[2 * i] = (byte)s; b[2 * i + 1] = (byte)(s >> 8);
         }
         return b;
+    }
+
+    /// <summary>A simple original test picture (a round sticker-style face) standing in for the user's own image.</summary>
+    private static BitmapSource TestPicture()
+    {
+        var dv = new DrawingVisual();
+        using (var dc = dv.RenderOpen())
+        {
+            dc.DrawEllipse(new RadialGradientBrush(Color.FromRgb(0xFF, 0xD5, 0x4F), Color.FromRgb(0xFF, 0x9F, 0x1C)), new Pen(Brushes.White, 10), new Point(200, 200), 180, 180);
+            dc.DrawEllipse(Brushes.Black, null, new Point(140, 170), 18, 24);
+            dc.DrawEllipse(Brushes.Black, null, new Point(260, 170), 18, 24);
+            var smile = new StreamGeometry();
+            using (var g = smile.Open()) { g.BeginFigure(new Point(120, 250), false, false); g.QuadraticBezierTo(new Point(200, 320), new Point(280, 250), true, true); }
+            dc.DrawGeometry(null, new Pen(Brushes.Black, 12) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }, smile);
+        }
+        var bmp = new RenderTargetBitmap(400, 400, 96, 96, PixelFormats.Pbgra32);
+        bmp.Render(dv);
+        return bmp;
     }
 
     private static bool ValidXlsx(string path)

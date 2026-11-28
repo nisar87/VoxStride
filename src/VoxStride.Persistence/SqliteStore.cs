@@ -244,6 +244,15 @@ public sealed class SqliteStore : IExecutionJournal, IRunHistory, IDisposable
         return list;
     }
 
+    /// <summary>Records tokens used outside a run (the live conversation reports usage per response).</summary>
+    public Task RecordUsageAsync(string provider, string? model, long input, long output, DateTimeOffset at, CancellationToken ct) =>
+        ExecAsync("INSERT INTO UsageEvents(RunId,Provider,Model,InputTokens,OutputTokens,At) VALUES($r,$p,$m,$i,$o,$a)", cmd =>
+        {
+            cmd.Parameters.AddWithValue("$r", "live"); cmd.Parameters.AddWithValue("$p", provider);
+            cmd.Parameters.AddWithValue("$m", (object?)model ?? DBNull.Value); cmd.Parameters.AddWithValue("$i", input);
+            cmd.Parameters.AddWithValue("$o", output); cmd.Parameters.AddWithValue("$a", Iso(at));
+        }, ct);
+
     public async Task<(long input, long output)> GetUsageSinceAsync(DateTimeOffset since, string provider, CancellationToken ct)
     {
         var r = await QueryAsync("SELECT COALESCE(SUM(InputTokens),0), COALESCE(SUM(OutputTokens),0) FROM UsageEvents WHERE At >= $s AND Provider=$p",

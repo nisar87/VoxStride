@@ -57,6 +57,17 @@ public sealed class CompanionMemory(string path)
 
     public void Clear() { lock (_gate) Save([]); }
 
+    public bool Remove(string exactText)
+    {
+        lock (_gate)
+        {
+            var list = All().ToList();
+            var n = list.RemoveAll(f => string.Equals(f.Text, exactText, StringComparison.Ordinal));
+            if (n > 0) Save(list);
+            return n > 0;
+        }
+    }
+
     public string AsPrompt() => string.Join("\n", All().TakeLast(80).Select(f => "- " + f.Text));
 
     private void Save(List<Fact> list)

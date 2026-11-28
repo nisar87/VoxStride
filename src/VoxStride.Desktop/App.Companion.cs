@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using VoxStride.Contracts;
@@ -53,6 +54,7 @@ public partial class App
             var c = Host.CreateCompanion();
             if (c is null) return;
             Companion = c;
+            c.Usage += (input, output) => _ = Host.Store.RecordUsageAsync("GeminiLive", c.Model, input, output, DateTimeOffset.UtcNow, CancellationToken.None);
             _companionWindow.Attach(c);
             Host.LiveActive = true;
             await Host.StopWakeAsync();
@@ -97,6 +99,45 @@ public partial class App
         _yieldMuted = false;
         c.SetMicMuted(!c.MicMuted);
         _companionWindow?.Attach(c); // refresh the look
+    }
+
+    /// <summary>Switches to one of VoxStride's characters (look, voice and personality).</summary>
+    public async Task ChooseCharacterAsync(string id)
+    {
+        var ch = CompanionCharacters.Get(id);
+        Settings.CompanionCharacter = ch.Id;
+        Settings.CompanionImagePath = null;
+        Settings.CloudVoiceName = ch.Voice;
+        Settings.Save();
+        Log.Info("live", $"character changed to {ch.Name} (voice {ch.Voice})");
+        _companionWindow?.ApplyLook();
+        if (Companion is { IsOn: true }) await RestartCompanionAsync(); // new voice and personality
+    }
+
+    /// <summary>Lets the user pick a picture (PNG, JPG, GIF) to use as the companion; a copy is kept in VoxStride's folder.</summary>
+    public async Task ChooseCompanionPictureAsync()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog { Title = "Choose a picture for your companion", Filter = "Pictures (*.png;*.jpg;*.jpeg;*.gif)|*.png;*.jpg;*.jpeg;*.gif" };
+        if (dlg.ShowDialog() != true) return;
+        var info = new System.IO.FileInfo(dlg.FileName);
+        if (info.Length > 15 * 1024 * 1024) { MessageBox.Show("That picture is too big (over 15 MB).", "VoxStride"); return; }
+        var dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VoxStride");
+        System.IO.Directory.CreateDirectory(dir);
+        var target = System.IO.Path.Combine(dir, "companion-picture" + info.Extension.ToLowerInvariant());
+        foreach (var old in System.IO.Directory.GetFiles(dir, "companion-picture.*")) { try { System.IO.File.Delete(old); } catch (System.IO.IOException) { } }
+        System.IO.File.Copy(dlg.FileName, target, overwrite: true);
+        Settings.CompanionImagePath = target;
+        Settings.Save();
+        Log.Info("live", "companion picture set (copied into VoxStride's folder)");
+        _companionWindow?.ApplyLook();
+        if (Companion is { IsOn: true }) await RestartCompanionAsync();
+    }
+
+    public void RemoveCompanionPicture()
+    {
+        Settings.CompanionImagePath = null;
+        Settings.Save();
+        _companionWindow?.ApplyLook();
     }
 
     public void ShowCompanion()

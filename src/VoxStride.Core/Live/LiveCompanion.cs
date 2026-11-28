@@ -22,6 +22,8 @@ public sealed record LiveOptions
     public TimeSpan TranscriptGrace { get; init; } = TimeSpan.FromMilliseconds(1500);
     public int MaxReconnects { get; init; } = 5;
     public string? UserName { get; init; }
+    /// <summary>The character's name ("Nova", "Ayaan"…); it is still VoxStride.</summary>
+    public string? AssistantName { get; init; }
     public string? Personality { get; init; }
     public Func<string>? Memory { get; init; }
 }
@@ -93,12 +95,14 @@ public sealed class LiveCompanion : IAsyncDisposable
 
     public event Action<CompanionState>? StateChanged;
     public event Action<CompanionCaption>? Caption;
+    /// <summary>Tokens reported by the service (input, output), to show the user what live conversation uses.</summary>
+    public event Action<long, long>? Usage;
     /// <summary>A tool started (true) or finished (false), with a short human description.</summary>
     public event Action<string, bool>? Activity;
 
     public static string BuildInstruction(LiveOptions o) =>
         $"""
-        You are VoxStride, a warm, upbeat companion who lives on the user's Windows PC and talks with them by voice, like a good friend sitting next to them.
+        You are {(o.AssistantName is { Length: > 0 } an ? an + ", the VoxStride companion" : "VoxStride")}, a companion who lives on the user's Windows PC and talks with them by voice, like a good friend sitting next to them.
         {(o.UserName is { Length: > 0 } n ? $"The user's name is {n}." : "")}
         {(o.Personality is { Length: > 0 } p ? "Your personality: " + p : "Personality: friendly, curious, a little playful, encouraging; you enjoy chatting and helping.")}
 
@@ -363,6 +367,10 @@ public sealed class LiveCompanion : IAsyncDisposable
             case LiveClosed c when !ct.IsCancellationRequested:
                 Log.Warn("live", $"connection closed: {c.Reason} error={c.IsError}");
                 if (c.IsError || _cts is { IsCancellationRequested: false }) await ReconnectAsync(c.Reason).ConfigureAwait(false);
+                break;
+
+            case LiveUsage u:
+                Usage?.Invoke(u.InputTokens, u.OutputTokens);
                 break;
 
             case LiveSetupComplete s:

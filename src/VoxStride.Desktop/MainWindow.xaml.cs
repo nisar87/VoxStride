@@ -195,8 +195,8 @@ public partial class MainWindow : Window
         var hasOpenAi = _app.Host!.Secrets.Load(ProviderSelector.SecretName(ProviderKind.OpenAI)) is { Length: > 0 };
         var hasGemini = _app.Host.Secrets.Load(ProviderSelector.SecretName(ProviderKind.Gemini)) is { Length: > 0 };
         var cloudVoices = (hasGemini ? GeminiVoice.Voices : Array.Empty<string>()).Concat(hasOpenAi || !hasGemini ? OpenAIVoice.Voices : Array.Empty<string>()).ToList();
-        CloudVoiceBox.ItemsSource = cloudVoices;
-        CloudVoiceBox.SelectedItem = cloudVoices.Contains(s.CloudVoiceName) ? s.CloudVoiceName : cloudVoices[0];
+        CloudVoiceBox.ItemsSource = cloudVoices.Select(v => new ComboBoxItem { Content = GeminiVoice.Describe(v), Tag = v }).ToList();
+        CloudVoiceBox.SelectedItem = CloudVoiceBox.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == s.CloudVoiceName) ?? CloudVoiceBox.Items[0];
         EngineInfo.Text = $"Currently using: {_app.Host.SpeechEngineLabel}. " + (_app.Host.UsingBasicEngine
             ? (!hasOpenAi && !hasGemini
                 ? "The offline Windows engine works without a key but is weak with accents. For accurate recognition of your accent and mixed Urdu/English, add an OpenAI or Gemini key under Reasoning providers and tick cloud speech above. (A Claude key can't transcribe audio.)"
@@ -214,8 +214,11 @@ public partial class MainWindow : Window
         ScreenPolicyBox.SelectedItem = ScreenPolicyBox.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == s.ScreenCapture.ToString()) ?? ScreenPolicyBox.Items[0];
         LiveModeBox.IsChecked = s.LiveMode; LiveStartBox.IsChecked = s.LiveStartListening; LiveSpeakersBox.IsChecked = s.LiveUsingSpeakers;
         UserNameBox.Text = s.UserName ?? ""; PersonalityBox.Text = s.CompanionPersonality ?? "";
-        var facts = _app.Host?.Memory.All().Count ?? 0;
-        MemoryCountText.Text = facts == 0 ? "VoxStride doesn't remember anything about you yet." : $"VoxStride remembers {facts} thing(s) you told it (kept only on this PC).";
+        RefreshMemoryList();
+        _ = RefreshLiveUsageAsync();
+        CharacterBox.ItemsSource = CompanionCharacters.All;
+        CharacterBox.SelectedItem = CompanionCharacters.Get(s.CompanionCharacter);
+        RemovePictureButton.Visibility = s.CompanionImagePath is null ? Visibility.Collapsed : Visibility.Visible;
         UseMyBrowserBox.IsChecked = s.UseMyBrowser;
         RefreshExtensionStatus();
         MicConsentBox.IsChecked = s.MicrophoneConsent; RetainBox.IsChecked = s.RetainTranscripts; StartupBox.IsChecked = s.LaunchAtLogon; LogTextBox.IsChecked = s.LogConversationText;
@@ -333,6 +336,7 @@ public partial class MainWindow : Window
         var s = _app.Settings;
         var wakeChanged = s.WakeWordEnabled != (WakeBox.IsChecked == true);
         s.WakeWordEnabled = WakeBox.IsChecked == true; s.YieldMicToOtherApps = YieldBox.IsChecked == true; s.AllowPlainProceed = PlainProceedBox.IsChecked == true;
+        var characterBefore = s.CompanionCharacter;
         var liveBefore = (s.LiveMode, s.LiveUsingSpeakers, s.UserName, s.CompanionPersonality, s.CloudVoiceName);
         s.LiveMode = LiveModeBox.IsChecked == true; s.LiveStartListening = LiveStartBox.IsChecked == true; s.LiveUsingSpeakers = LiveSpeakersBox.IsChecked == true;
         s.UserName = UserNameBox.Text.Trim() is { Length: > 0 } un ? un : null;
@@ -350,7 +354,7 @@ public partial class MainWindow : Window
         if (EngineBox.SelectedItem is ComboBoxItem { Tag: string tag }) s.SpeechEngine = Enum.Parse<SpeechEngine>(tag);
         s.MicSensitivity = SensitivitySlider.Value;
         s.NaturalVoice = NaturalVoiceBox.IsChecked == true;
-        if (CloudVoiceBox.SelectedItem is string cv) s.CloudVoiceName = cv;
+        if (CloudVoiceBox.SelectedItem is ComboBoxItem { Tag: string cv }) s.CloudVoiceName = cv;
         s.Save();
         _app.Host!.RefreshVoice();
         if (!string.Equals(micBefore, s.MicrophoneName, StringComparison.Ordinal)) _app.Host.MicrophoneChanged(); // applies immediately
@@ -367,7 +371,12 @@ public partial class MainWindow : Window
         if (_app.Host!.Speech is { } sp) { sp.Enabled = s.SpeakResults; sp.CuesEnabled = s.AudioCues; }
         if (wakeChanged) { if (s.WakeWordEnabled) await _app.Host.StartWakeAsync(); else await _app.Host.StopWakeAsync(); }
         _app.ApplyOverlayVisibility();
-        if (liveBefore != (s.LiveMode, s.LiveUsingSpeakers, s.UserName, s.CompanionPersonality, s.CloudVoiceName))
+        if (CharacterBox.SelectedItem is CompanionCharacter ch && ch.Id != characterBefore)
+        {
+            await _app.ChooseCharacterAsync(ch.Id); // also sets its voice and restarts the conversation
+            LoadSettingsIntoUi();
+        }
+        else if (liveBefore != (s.LiveMode, s.LiveUsingSpeakers, s.UserName, s.CompanionPersonality, s.CloudVoiceName))
         {
             if (!s.LiveMode) await _app.StopCompanionAsync("live mode turned off");
             else if (_app.Companion is { IsOn: true }) await _app.RestartCompanionAsync(); // new voice, name or personality
@@ -380,8 +389,44 @@ public partial class MainWindow : Window
     {
         if (MessageBox.Show(this, "Forget everything you asked VoxStride to remember?", "VoxStride", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         _app.Host?.Memory.Clear();
-        MemoryCountText.Text = "VoxStride doesn't remember anything about you yet.";
+        RefreshMemoryList();
         Log.Info("memory", "all remembered facts cleared by the user");
+    }
+
+    private async void CompanionPicture_Click(object sender, RoutedEventArgs e)
+    {
+        await _app.ChooseCompanionPictureAsync();
+        RemovePictureButton.Visibility = _app.Settings.CompanionImagePath is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void RemovePicture_Click(object sender, RoutedEventArgs e)
+    {
+        _app.RemoveCompanionPicture();
+        RemovePictureButton.Visibility = Visibility.Collapsed;
+    }
+
+    private void ForgetSelected_Click(object sender, RoutedEventArgs e)
+    {
+        if (MemoryList.SelectedItem is not ListBoxItem { Tag: string text }) return;
+        _app.Host?.Memory.Remove(text);
+        RefreshMemoryList();
+        Log.Info("memory", "one remembered fact removed by the user");
+    }
+
+    private void RefreshMemoryList()
+    {
+        var facts = _app.Host?.Memory.All() ?? [];
+        MemoryCountText.Text = facts.Count == 0 ? "VoxStride doesn't remember anything about you yet. Say \"remember that…\" to teach it." : $"What VoxStride remembers about you ({facts.Count}, kept only on this PC):";
+        MemoryList.ItemsSource = facts.Select(f => new ListBoxItem { Content = f.Text, Tag = f.Text, ToolTip = "Saved " + f.Saved.ToString("d MMM yyyy", CultureInfo.CurrentCulture) }).ToList();
+    }
+
+    private async Task RefreshLiveUsageAsync()
+    {
+        if (_app.Host is null) return;
+        var today = new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero);
+        var (i, o) = await _app.Host.Store.GetUsageSinceAsync(today, "GeminiLive", CancellationToken.None);
+        LiveUsageText.Text = i + o == 0 ? "Live conversation hasn't used any Gemini tokens today." :
+            $"Live conversation today: about {(i + o):N0} Gemini tokens ({i:N0} in, {o:N0} out). Check your limits at aistudio.google.com.";
     }
 
     /// <summary>A new OpenAI or Gemini key can enable cloud speech straight away; no restart needed.</summary>

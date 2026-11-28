@@ -89,3 +89,24 @@ public sealed class GeminiLiveCodecTests
     [InlineData("audio/pcm", 24000)]
     public void SampleRateFromMime(string mime, int rate) => Assert.Equal(rate, GeminiLiveCodec.RateOf(mime));
 }
+
+public sealed class GeminiLiveUsageTests
+{
+    [Fact]
+    public void UsageMetadataIsReported()
+    {
+        var u = Assert.IsType<LiveUsage>(Assert.Single(VoxStride.Providers.GeminiLiveCodec.Parse("""{"usageMetadata":{"promptTokenCount":120,"responseTokenCount":45,"totalTokenCount":165}}""", "m")));
+        Assert.Equal(120, u.InputTokens);
+        Assert.Equal(45, u.OutputTokens);
+        var t = Assert.IsType<LiveUsage>(Assert.Single(VoxStride.Providers.GeminiLiveCodec.Parse("""{"usageMetadata":{"promptTokenCount":100,"totalTokenCount":130}}""", "m")));
+        Assert.Equal(30, t.OutputTokens);
+    }
+
+    [Fact]
+    public void AllThirtyVoicesHaveAStyle()
+    {
+        Assert.Equal(30, VoxStride.Providers.GeminiVoice.Catalogue.Count);
+        Assert.Equal("Sulafat — warm", VoxStride.Providers.GeminiVoice.Describe("Sulafat"));
+        Assert.Equal("marin", VoxStride.Providers.GeminiVoice.Describe("marin"));
+    }
+}

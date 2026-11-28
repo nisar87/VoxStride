@@ -103,6 +103,13 @@ public static class GeminiLiveCodec
         if (root is not JsonObject m) return events;
 
         if (m["setupComplete"] is not null) events.Add(new LiveSetupComplete(model));
+        if (m["usageMetadata"] is JsonObject u)
+        {
+            long N(string k) => u[k] is JsonValue v && v.TryGetValue<long>(out var n) ? n : 0;
+            var input = N("promptTokenCount"); var output = N("responseTokenCount");
+            if (output == 0) output = Math.Max(0, N("totalTokenCount") - input);
+            if (input + output > 0) events.Add(new LiveUsage(input, output));
+        }
         if (m["serverContent"] is JsonObject sc)
         {
             if (sc["interrupted"]?.GetValue<bool>() == true) events.Add(new LiveInterrupted());

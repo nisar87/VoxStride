@@ -281,7 +281,8 @@ public sealed class AppHost : IAsyncDisposable
             Voice = GeminiVoice.NormalizeVoice(Settings.CloudVoiceName),
             HalfDuplex = Settings.LiveUsingSpeakers,
             UserName = Settings.UserName,
-            Personality = Settings.CompanionPersonality,
+            AssistantName = Settings.CompanionImagePath is null ? CompanionCharacters.Get(Settings.CompanionCharacter).Name : null,
+            Personality = Settings.CompanionPersonality ?? (Settings.CompanionImagePath is null ? CompanionCharacters.Get(Settings.CompanionCharacter).Personality : null),
             Memory = Memory.AsPrompt,
         };
         Log.Info("live", $"companion configured voice={options.Voice} halfDuplex={options.HalfDuplex} tools={Registry.Definitions.Count} memoryFacts={Memory.All().Count}");
