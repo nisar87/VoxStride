@@ -51,3 +51,15 @@
   - `GeminiLiveCodecTests` (setup, client messages, every server message type).
   - `XlsxTests`, `ScreenLookPolicyTests`, `CompanionMemoryTests`.
   - Live behaviour against Google's service needs the owner's key; it is not exercised in CI.
+
+## Addendum (0.9.0)
+- **Context that isn't the user** goes through `LiveCompanion.SendContextAsync`: Twitch chat, Twitch events and
+  periodic screen frames. It closes the current turn's authorization, so a tool call it triggers can only read.
+  Tested in `LiveCompanionContextTests` and in the CI self-test `twitch-viewers-cannot-act`.
+- **Screen comments** use Gemini `proactivity.proactiveAudio`, so the model may stay silent. A frame is sent only
+  when the screen changed (SHA-256) and nobody spoke for 15 s. The feature is opt-in and needs screen policy
+  "WhenNeeded".
+- **Speakers mode:** the echo level is learned only from frames that aren't the user. Barge-in needs 3 consecutive
+  frames at 3× the echo level.
+- **Offline mode:** an `OllamaProvider` uses /api/chat (tools, NDJSON). Without a Gemini key, the companion window
+  mirrors the classic `ConversationCoordinator` states.

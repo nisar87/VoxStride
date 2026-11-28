@@ -47,6 +47,11 @@ With a Gemini key, VoxStride appears as a character on your desktop and you just
 - **Memory**: say "remember that…" and "forget…". Settings › Voice › Forget everything clears it.
 - **Speakers instead of a headset**: right-click the character › "I'm using speakers" so it doesn't hear itself.
 - **Move or resize**: drag the character; resize with Ctrl + mouse wheel. Hide it from its menu, and bring it back from the tray icon › Show companion.
+- **Characters**: right-click the character › Character, or go to Settings › Voice. There are six characters, each with its own voice and personality, or you can use your own picture.
+- **Twitch co-host**: Settings › Voice › tick Twitch co-host and enter your channel. Chat is read anonymously, viewers can't make it act on your PC, and it never posts in chat.
+- **Screen comments**: tick "Glance at my screen now and then" (needs "Looking at my screen: whenever it needs to").
+- **Memory**: Settings › Voice lists what it remembers. Select an item and click Forget selected.
+- **Offline AI**: install Ollama, run `ollama pull qwen3:8b`, then under Reasoning providers › Offline AI click Save and make it the active provider. Without a Gemini key, the character uses the classic voice mode.
 - **Cost**: live conversation uses your Gemini account. The free tier has limits. Audio is sent only while you're speaking.
 
 ## 3a. Files anywhere you allow
