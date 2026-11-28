@@ -49,6 +49,12 @@ try {
   $cpu0 = $p0.TotalProcessorTime.TotalSeconds
   Start-Sleep -Seconds 60
   $p1 = Get-Process -Id $app.Id -ErrorAction SilentlyContinue
+  if ($null -eq $p0 -or $null -eq $p1) {
+    $log = Join-Path $env:LOCALAPPDATA 'VoxStride\logs\voxstride.log'
+    if (Test-Path $log) { Write-Host '----- voxstride.log (last 80 lines) -----'; Get-Content $log -Tail 80 | ForEach-Object { Write-Host $_ } }
+  }
+  Step 'app-running-at-20s' ($null -ne $p0) "pid $($app.Id) exit=$($app.ExitCode)"
+  Step 'app-still-running-after-80s' ($null -ne $p1) "pid $($app.Id) exit=$($app.ExitCode)"
   $cpuPct = [math]::Round((($p1.TotalProcessorTime.TotalSeconds - $cpu0) / 60.0) / [Environment]::ProcessorCount * 100, 2)
   $wsMb = [math]::Round($p1.WorkingSet64 / 1MB, 1)
   $result.idle = @{ cpuPercentAvg = $cpuPct; workingSetMb = $wsMb; cores = [Environment]::ProcessorCount; seconds = 60; note = 'CI runner: no microphone, so wake-word listening is inactive' }
