@@ -60,8 +60,9 @@ public sealed class AppSettings
     /// <summary>Using speakers rather than a headset: VoxStride stops listening while it talks so it doesn't hear itself.</summary>
     public bool LiveUsingSpeakers { get; set; }
     public bool CompanionVisible { get; set; } = true;
-    public double CompanionLeft { get; set; } = double.NaN;
-    public double CompanionTop { get; set; } = double.NaN;
+    /// <summary>Where the companion was last placed (null: bottom-right of the screen).</summary>
+    public double? CompanionLeft { get; set; }
+    public double? CompanionTop { get; set; }
     public double CompanionScale { get; set; } = 1.0;
     public string? UserName { get; set; }
     public string? CompanionPersonality { get; set; }
@@ -94,7 +95,7 @@ public sealed class AppSettings
     /// <summary>Include what the user says and VoxStride's replies in the local diagnostics log (never audio, never keys).</summary>
     public bool LogConversationText { get; set; } = true;
 
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
+    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals, Converters = { new JsonStringEnumConverter() } };
 
     public static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VoxStride");
     public static string FilePath => Path.Combine(Folder, "settings.json");

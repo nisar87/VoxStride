@@ -203,6 +203,17 @@ public sealed class LiveCompanionTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task AfterTheTurnEndsTheOldWordsNoLongerAuthorizeAnything()
+    {
+        await _c.StartAsync();
+        T.Raise(new LiveInputText("create the file"));
+        T.Raise(new LiveTurnComplete());
+        T.Raise(new LiveToolCall([new LiveFunctionCall("c9", "test_write", new JsonObject())]));
+        await Until(() => T.ToolResponses.Count == 1);
+        Assert.Equal(0, _write.Runs);
+    }
+
+    [Fact]
     public async Task ScreenPictureIsSentAsAFrameBeforeTheToolResponse()
     {
         await _c.StartAsync();

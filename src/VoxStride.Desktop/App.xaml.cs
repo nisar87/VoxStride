@@ -48,6 +48,12 @@ public partial class App : Application
             Shutdown(code);
             return;
         }
+        if (e.Args.Contains("--companion-selftest"))
+        {
+            var code = await RunCompanionSelfTestAsync(e.Args);
+            Shutdown(code);
+            return;
+        }
         if (e.Args.Contains("--smoke-test"))
         {
             var code = await SmokeTest.RunAsync(e.Args);

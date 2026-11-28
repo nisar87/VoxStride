@@ -70,7 +70,6 @@ public sealed class LiveCompanion : IAsyncDisposable
     private double _noise = 100;
     private int _preRollBytes;
     private int _toolSeq;
-    private string _lastTyped = "";
 
     public LiveCompanion(Func<ILiveTransport> transportFactory, AudioHub mic, ILiveAudioOut speaker, ToolRegistry registry, ToolBroker broker,
         RunAuthority authority, LiveApproval? approval, ISpeechSynthesizer? localVoice, LiveOptions options, TimeProvider time)
@@ -172,7 +171,7 @@ public sealed class LiveCompanion : IAsyncDisposable
     public async Task SendTextAsync(string text)
     {
         if (string.IsNullOrWhiteSpace(text) || _transport is not { IsOpen: true } t) return;
-        lock (_gate) { _lastTyped = text.Trim(); _userTurn.Clear().Append(text.Trim()); _lastUserWords = _time.GetUtcNow(); }
+        lock (_gate) { _userTurn.Clear().Append(text.Trim()); _userTurnClosed = false; _lastUserWords = _time.GetUtcNow(); }
         Say(CaptionSpeaker.User, text.Trim(), true);
         _speaker.Clear();
         SetState(CompanionState.Thinking, "typed");
@@ -423,14 +422,10 @@ public sealed class LiveCompanion : IAsyncDisposable
         SetState(CompanionState.Thinking, "tool results sent");
     }
 
+    /// <summary>The user's words in the current turn. After the turn ended, a new tool call has no user words.</summary>
     private string UserWords()
     {
-        lock (_gate)
-        {
-            var w = _userTurn.ToString().Trim();
-            if (w.Length > 0) return w;
-            return _time.GetUtcNow() - _lastUserWords < TimeSpan.FromSeconds(30) ? _lastTyped : "";
-        }
+        lock (_gate) return _userTurnClosed ? "" : _userTurn.ToString().Trim();
     }
 
     private async Task<(JsonObject Response, (byte[], string)? Image)> RunToolAsync(LiveFunctionCall call, string words, CancellationToken ct)

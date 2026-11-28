@@ -137,12 +137,33 @@ public partial class CompanionWindow : Window
         LedL.Fill = b; LedR.Fill = b;
     }
 
+    /// <summary>Self-test: show a state with a given mouth opening and bubble, then render the window to a bitmap.</summary>
+    internal System.Windows.Media.Imaging.BitmapSource Snapshot(CompanionState state, double mouth, string? bubble, bool ask, bool muted = false)
+    {
+        _forcedMouth = mouth;
+        ApplyState(state);
+        if (muted) { MicButton.Background = new SolidColorBrush(Color.FromRgb(0xE5, 0x48, 0x4D)); MicGlyph.Text = "\uEC54"; StatusText.Text = "Mic muted — click the mic to talk"; StatusDot.Fill = new SolidColorBrush(Color.FromRgb(0xE5, 0x48, 0x4D)); }
+        if (ask && bubble is not null) ShowQuestion(bubble);
+        else if (bubble is not null) { AskButtons.Visibility = Visibility.Collapsed; BubbleText.Text = bubble; Bubble.Visibility = Visibility.Visible; }
+        else Bubble.Visibility = Visibility.Collapsed;
+        for (var i = 0; i < 40; i++) Animate(null, EventArgs.Empty); // settle the eased animations
+        UpdateLayout();
+        var w = (int)Math.Ceiling(Root.ActualWidth); var h = (int)Math.Ceiling(Root.ActualHeight);
+        var bmp = new System.Windows.Media.Imaging.RenderTargetBitmap(Math.Max(1, w), Math.Max(1, h), 96, 96, PixelFormats.Pbgra32);
+        bmp.Render(Root);
+        _forcedMouth = null;
+        return bmp;
+    }
+
+    private double? _forcedMouth;
+
     // ---------------- animation ----------------
 
     private void Animate(object? sender, EventArgs e)
     {
         if (!IsVisible) return;
         var t = (DateTime.UtcNow - _start).TotalSeconds;
+        if (_forcedMouth is not null) { _blinkUntil = -1; _nextBlink = Math.Max(_nextBlink, t + 5); } // eyes open in snapshots
 
         // breathing and a gentle sway
         Breath.Y = Math.Sin(t * 2 * Math.PI / 3.6) * 2.2;
@@ -183,8 +204,8 @@ public partial class CompanionWindow : Window
         BrowRUp.Y += ((_state is CompanionState.Thinking ? -4.0 : browTarget) - BrowRUp.Y) * 0.15;
 
         // lip sync with VoxStride's own voice
-        var level = _state == CompanionState.Speaking || _companion?.OutputLevel > 0.02 ? _companion?.OutputLevel ?? 0 : 0;
-        _mouth += (level - _mouth) * (level > _mouth ? 0.6 : 0.25);
+        var level = _forcedMouth ?? (_state == CompanionState.Speaking || _companion?.OutputLevel > 0.02 ? _companion?.OutputLevel ?? 0 : 0);
+        _mouth = _forcedMouth ?? _mouth + (level - _mouth) * (level > _mouth ? 0.6 : 0.25);
         if (_mouth > 0.04)
         {
             Smile.Visibility = Visibility.Collapsed;
@@ -298,10 +319,10 @@ public partial class CompanionWindow : Window
     {
         var area = SystemParameters.WorkArea;
         var s = _app.Settings;
-        if (!double.IsNaN(s.CompanionLeft) && !double.IsNaN(s.CompanionTop)
-            && s.CompanionLeft > SystemParameters.VirtualScreenLeft - 50 && s.CompanionLeft < SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth - 80
-            && s.CompanionTop > SystemParameters.VirtualScreenTop - 50 && s.CompanionTop < SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight - 80)
-        { Left = s.CompanionLeft; Top = s.CompanionTop; return; }
+        if (s.CompanionLeft is { } l && s.CompanionTop is { } t && double.IsFinite(l) && double.IsFinite(t)
+            && l > SystemParameters.VirtualScreenLeft - 50 && l < SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth - 80
+            && t > SystemParameters.VirtualScreenTop - 50 && t < SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight - 80)
+        { Left = l; Top = t; return; }
         Left = area.Right - Width - 12;
         Top = area.Bottom - Height;
     }

@@ -42,6 +42,23 @@ try {
   $result.smoke = $smokeJson | ConvertFrom-Json
   Step 'smoke-test' ($p.ExitCode -eq 0) "exit $($p.ExitCode)"
 
+  # Companion self-test: renders the character in every state and drives a scripted conversation through the real tools.
+  $selfDir = Join-Path $env:TEMP 'voxstride-companion'
+  $p = Start-Process -FilePath $exe -ArgumentList '--companion-selftest', '--out', $selfDir -Wait -PassThru
+  $selfJson = Join-Path $selfDir 'companion-selftest.json'
+  $result.companion = if (Test-Path $selfJson) { Get-Content $selfJson -Raw | ConvertFrom-Json } else { @{ status = 'missing' } }
+  Write-Host '----- companion self-test -----'
+  if (Test-Path $selfJson) { Get-Content $selfJson -Raw | Write-Host }
+  foreach ($png in 'companion-states.png', 'companion-live-asking.png') {
+    $f = Join-Path $selfDir $png
+    if (Test-Path $f) { Write-Host "BEGIN-PNG $png"; [Convert]::ToBase64String([IO.File]::ReadAllBytes($f)) -split '(.{1,4000})' | Where-Object { $_ } | ForEach-Object { Write-Host "PNG:$_" }; Write-Host "END-PNG $png" }
+  }
+  if ($p.ExitCode -ne 0) {
+    $log = Join-Path $env:LOCALAPPDATA 'VoxStride\logs\voxstride.log'
+    if (Test-Path $log) { Write-Host '----- voxstride.log (last 60 lines) -----'; Get-Content $log -Tail 60 | ForEach-Object { Write-Host $_ } }
+  }
+  Step 'companion-selftest' ($p.ExitCode -eq 0) "exit $($p.ExitCode)"
+
   # Section 11 idle resources: run the installed app in the background for 60 s and measure CPU and memory.
   $app = Start-Process -FilePath $exe -ArgumentList '--background' -PassThru
   Start-Sleep -Seconds 20   # let startup (catalog build, first window) settle
