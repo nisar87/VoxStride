@@ -107,8 +107,8 @@
                         <Ellipse Canvas.Left="48" Canvas.Top="112" Width="18" Height="26" Fill="{StaticResource SkinShade}"/>
                         <Ellipse Canvas.Left="174" Canvas.Top="112" Width="18" Height="26" Fill="{StaticResource SkinShade}"/>
                         <!-- fringe -->
-                        <Path Fill="{StaticResource Hair}" Data="M 52,104 C 54,46 186,40 188,104 C 170,84 150,74 128,72 C 140,84 142,92 138,100 C 122,82 100,74 80,80 C 86,88 86,96 82,104 C 72,96 62,98 52,104 Z"/>
-                        <Path Fill="#40FFFFFF" Data="M 92,60 C 110,52 140,52 156,60 C 140,58 112,58 92,64 Z"/>
+                        <Path Fill="{StaticResource Hair}" Data="M 52,110 C 48,46 192,42 188,110 L 180,96 L 172,100 L 164,82 L 152,94 L 140,76 L 128,92 L 116,74 L 104,92 L 92,78 L 82,96 L 72,86 L 64,102 Z"/>
+                        <Path Fill="#40FFFFFF" Data="M 90,58 C 108,50 140,50 158,58 C 140,56 110,56 90,62 Z"/>
 
                         <!-- eyebrows -->
                         <Path x:Name="BrowL" Stroke="{StaticResource Ink}" StrokeThickness="3.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M 82,100 Q 94,94 106,99">

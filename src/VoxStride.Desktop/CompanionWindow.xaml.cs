@@ -25,6 +25,7 @@ public partial class CompanionWindow : Window
     private readonly Random _rng = new();
     private readonly DateTime _start = DateTime.UtcNow;
     private readonly DispatcherTimer _bubbleTimer = new() { Interval = TimeSpan.FromSeconds(9) };
+    private readonly DispatcherTimer _frame;
     private LiveCompanion? _companion;
     private CompanionState _state = CompanionState.Off;
     private double _nextBlink = 2, _blinkUntil = -1, _mouth, _micLevel;
@@ -36,7 +37,11 @@ public partial class CompanionWindow : Window
         var s = app.Settings;
         ApplyScale(s.CompanionScale);
         Loaded += (_, _) => PlaceWindow();
-        CompositionTarget.Rendering += Animate;
+        // Animation on a timer rather than every display frame: smooth while talking or listening closely, slow and cheap
+        // while idle (CompositionTarget.Rendering kept the CPU busy even when nothing was happening).
+        _frame = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(100) };
+        _frame.Tick += Animate;
+        IsVisibleChanged += (_, _) => { if (IsVisible) _frame.Start(); else _frame.Stop(); };
         _bubbleTimer.Tick += (_, _) => { _bubbleTimer.Stop(); if (AskButtons.Visibility != Visibility.Visible) Bubble.Visibility = Visibility.Collapsed; };
         Input.TextChanged += (_, _) => Placeholder.Visibility = Input.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         PreviewMouseWheel += OnWheel;
@@ -162,6 +167,9 @@ public partial class CompanionWindow : Window
     private void Animate(object? sender, EventArgs e)
     {
         if (!IsVisible) return;
+        var busy = _state is CompanionState.Hearing or CompanionState.Speaking or CompanionState.Thinking or CompanionState.Working or CompanionState.AwaitingYes or CompanionState.Connecting or CompanionState.Reconnecting;
+        var wanted = TimeSpan.FromMilliseconds(busy ? 40 : 100); // 25 fps when something is happening, 10 fps at rest
+        if (_frame.Interval != wanted) _frame.Interval = wanted;
         var t = (DateTime.UtcNow - _start).TotalSeconds;
         if (_forcedMouth is not null) { _blinkUntil = -1; _nextBlink = Math.Max(_nextBlink, t + 5); } // eyes open in snapshots
 
@@ -174,7 +182,7 @@ public partial class CompanionWindow : Window
             CompanionState.Speaking => Math.Sin(t * 2.3) * 2.5,
             _ => Math.Sin(t * 0.7) * 1.2,
         };
-        HeadTilt.Angle += (tiltTarget - HeadTilt.Angle) * 0.08;
+        HeadTilt.Angle += (tiltTarget - HeadTilt.Angle) * (busy ? 0.15 : 0.3);
 
         // blinking
         if (t >= _nextBlink) { _blinkUntil = t + 0.13; _nextBlink = t + 2.5 + _rng.NextDouble() * 3.5; if (_rng.NextDouble() < 0.15) _nextBlink = t + 0.3; }
@@ -329,7 +337,7 @@ public partial class CompanionWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        CompositionTarget.Rendering -= Animate;
+        _frame.Stop();
         base.OnClosed(e);
     }
 }
