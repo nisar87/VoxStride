@@ -39,6 +39,17 @@ Test IDs follow spec §17. **Automated** tests run on every push in GitHub Actio
 | PERF-01 | Installed-build smoke test: 30 direct runs p50/p95, hard-stop time; `Test-Installer.ps1` 60 s idle CPU/working set | Windows CI |
 | INST-01 | `scripts/Test-Installer.ps1` (silent per-user install, smoke test from installed exe, uninstall, data removal) | Windows CI |
 
+### Live companion (installed build, `--companion-selftest`, CI)
+| Check | What it proves |
+|---|---|
+| rendered-states, characters | Every state and all six characters plus the own-picture avatar render (PNG in the CI log, `docs/images/`) |
+| connected, persona, tools-offered | Session set up with all tools and the "no proceed" instruction |
+| speaking-state, barge-in-stops-voice | Replies play; interrupting stops the voice |
+| excel-created-without-proceed | A real xlsx is created in Documents straight from the request, then read back |
+| screen-looked-at | One screen frame is sent before the tool response |
+| asks-before-deleting, deleted-after-spoken-yes | An irreversible action waits, then runs on a spoken "yes" |
+| no-words-no-changes, twitch-viewers-cannot-act | Nothing changes without the user's own words, including when a Twitch viewer tries |
+
 ## Manual / physical test scripts (pending execution)
 
 Run them on a dedicated Windows 11 test account, using synthetic files only. Record results in `docs/benchmarks/<date>-<pc>.json` using the evidence template from spec §17.
@@ -51,6 +62,8 @@ Run them on a dedicated Windows 11 test account, using synthetic files only. Rec
 - **M-B01 (live):** run "search YouTube for lofi beats and play the third video in the top row". Pass: the URL's video id matches the selected card and playback is verified, or choices are offered.
 - **M-EXT:** load the extension in your normal Chrome, allow one site, then run "search this page for…" and "fill the search box with … and search". Pass: the badge shows activity, the submit asks for approval, and other tabs are untouched.
 - **M-B02 (live):** run "open ChatGPT and draft a prompt about meal planning". Pass: text appears in the input and nothing is sent.
+
+- **M-LIVE (owner):** with a Gemini key, say "Hi, how are you?", interrupt the reply, and ask for "the weather in France in an Excel sheet". Ask "what's on my screen?" and ask it to delete a test file (say "no", then "yes"). Pass: a reply starts in about 1–2 s, interrupting stops it, the sheet opens, and the delete happens only after "yes".
 
 ### Live provider smoke tests
 With a test key and a small budget, set the provider in Settings, then type each of these:

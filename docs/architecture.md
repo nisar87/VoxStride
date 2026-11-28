@@ -84,6 +84,22 @@ Both browser back-ends implement `IWebAutomation` and share `voxstride-page.js`,
 - **User's own browser:** MV3 extension (`activeTab`, `scripting` and optional per-site host permissions). The native host `com.voxstride.bridge` is limited to the fixed extension id. The relay mode of `VoxStride.exe` forwards to the pipe `VoxStride.Bridge.<user>` (CurrentUserOnly). The app checks the caller origin and protocol version, the extension re-checks the tab origin, and messages are capped at 1 MB.
 - Page content is untrusted. Text that looks like an injected instruction is flagged, and submits or irreversible clicks need approval.
 
+## Live companion (ADR-0013)
+```
+Mic ─► AudioHub (auto-gain) ─► local VAD + pre-roll ─► GeminiLiveTransport (WebSocket) ◄─► Gemini Live
+                                                            │  audio ▼            ▲ tool responses / frames
+                                               WaveOutStream (barge-in)   LiveCompanion ─► ToolBroker ─► tools
+                                                            │                    ▲
+                                               CompanionWindow (character, bubble, bar)   LiveApproval (spoken yes / click)
+Twitch chat ─► TwitchCoHost ─┐
+Screen loop (opt-in) ────────┴─► SendContextAsync (marked "not the user", never authorizes)
+```
+- `LiveCompanion` mints a `RunAuthorization` per tool call. It is bound to the transcription of the user's own words in that turn. With no user words, only read-only tools are allowed.
+- `LiveApproval` approves reversible requests automatically. Irreversible ones ask; the question is shown and spoken, and the answer comes from the user's transcribed voice or a click.
+- `CompanionWindow` draws one of six original characters, or the user's picture. Its states are listening, hearing, thinking, working, talking, asking and muted. Animation runs on a timer: 25 fps while busy and about 7 fps at rest, and values snap once settled, so an idle character costs about 0.3 % CPU.
+- Without a Gemini key, the same window mirrors the classic `ConversationCoordinator` (cloud, local or Ollama AI).
+- Tools added for the companion: `files_create_document` (with its own xlsx writer), `screen_look`, `memory_remember` and `memory_forget`.
+
 ## Natural mode (ADR-0012)
 An opt-in pause-ended turn is `InputMode.VoiceNatural`, and its run is minted without mutating tools. "VoxStride, execute" within 90 s confirms it as an explicit commit.
 

@@ -42,12 +42,17 @@ User files in allowed folders, temp files, API keys, browser sessions (VoxStride
 | T21 | Another program impersonates the extension or the app over IPC | Native host registered under HKCU with `allowed_origins` = fixed extension id; relay only forwards; pipe is `CurrentUserOnly`; app requires the allowlisted origin + protocol version; 1 MB message cap; request ids and timeouts | `ExtensionBridgeTests` (wrong origin/version refused, oversized frame), installer host checks |
 | T22 | Extension over-reach in the user's browser | MV3 with `activeTab` + optional per-site host permissions granted by the user; acts on the active tab only; tab origin re-checked per request; no cookies/storage/password access; badge shows activity; blocked sites refused in the app | `ExtensionEndToEndTests` (origin mismatch refused), manifest review |
 | T23 | Tampered update | Updates only from the GitHub Releases API over HTTPS; installer SHA-256 must match `SHA256SUMS.txt`; per-user install, no elevation | `UpdateLogic` tests (`PrereleaseAndForeignHostsAreIgnored`, `ChecksumLookupMatchesFileName`); residual: unsigned until a certificate is approved |
+| T24 | The model acts without the user asking (live mode) | A tool call is authorized only by the user's own transcribed or typed words in the current turn. After the turn ends, or with context only, mutating tools are refused (`not_requested`). | `LiveCompanionTests.WithoutTheUsersWords…`, `AfterTheTurnEnds…`, self-test `no-words-no-changes` |
+| T25 | Twitch viewers or on-screen text steer the companion | Chat, events and screen frames go in through `SendContextAsync`, marked "not the user", and close the turn's authorization. Bots and commands are dropped, links are removed and text is capped. Chat is read anonymously and never posted to. | `TwitchCoHostTests`, `LiveCompanionContextTests.ContextFromViewers…`, self-test `twitch-viewers-cannot-act` |
+| T26 | Irreversible action without consent in live mode | `LiveApproval` asks every time for recycle/delete, cleanup, Send/Pay/Submit, form submits and coordinate clicks. Only the user's voice ("yes"/"no") or a click answers. There's a 2-minute timeout and the default is no. | `IrreversibleActionWaitsForASpokenYes`, `SayingNoCancels…`, self-test `asks-before-deleting` |
+| T27 | Screen content leaves the PC | Policy is Ask each time (default), Whenever needed, or Never. Captures are single frames, never saved, and treated as untrusted. Screen comments are opt-in and need "Whenever needed". | `ScreenLookPolicyTests`, `ScreenCommentsSendAChangedScreen…` |
 
 ## Residual risks (open)
 - Wake-phrase false accepts and recognition accuracy on real microphones are unmeasured (V06).
 - Windows 11 Notepad session-restore can open a non-empty tab, in which case insertion is refused rather than overwriting. This needs physical verification.
 - Injection detection is heuristic. The real defence is that page text can't authorize anything: every effect still needs a committed instruction, an allowed tool and, for anything irreversible, a click.
 - The extension is installed unpacked until store listings are approved (paid accounts). Developer-mode extensions trigger a browser warning banner.
-- Own-voice gating is not acoustic echo cancellation; loud speakers can still be heard between replies.
+- Own-voice gating is not acoustic echo cancellation; loud speakers can still be heard between replies. In live speakers mode, barge-in needs the user to be 3× louder than the learned echo level.
+- Live audio and any screen frames go to Google under the user's own Gemini key. Ollama keeps everything on the PC.
 - The installer is unsigned until the owner provides a certificate.
 - No independent third-party security review has been performed.

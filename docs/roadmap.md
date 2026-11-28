@@ -1,11 +1,11 @@
 # Roadmap
 
-Ordered by the spec's §16 backlog. P0–P6 are implemented (see `progress.md`). What remains needs the owner's PC, money or an outside party, or is P7 scope.
+P0–P6 of the plan and the live companion (ADR-0013) are implemented; see `progress.md`. What remains needs the owner's PC, money or an outside party, or is new scope.
 
-1. **Physical verification (owner PC).** M-V01 (200 real-mic trials), M-V06 (false wakes per 8 h), wake latency p95, Notepad++ and Windows 11 Notepad, multi-monitor/DPI, live YouTube and ChatGPT, screen-reader pass. Diagnostics logging captures the evidence; record results in `docs/benchmarks/`.
-2. **Live provider parity.** Run the smoke tests for Claude, Gemini and OpenAI with the owner's keys. Record model IDs, p50/p95 `t_first_useful_action` and token usage.
-3. **Paid release hardening (owner approval required).** Code-signing certificate for the installer and updates; Chrome Web Store / Edge Add-ons listings for the extension.
-4. **Independent security review** of the broker, UIA, browser bridge and updater.
-5. **Disposable-VM research.** Hands-on competitor trials and the UFO benchmark (P0).
-6. **Acoustic echo cancellation** (Windows communications-mode capture) to allow barge-in over loud speakers. Today VoxStride ignores the microphone while it speaks. This must not change the user's Windows sound settings.
-7. **P7 expansion.** Office adapters, Urdu/mixed-language evaluation, reusable approved workflows. Each needs its own acceptance suite.
+1. **First real-world run (owner PC).** Run a Gemini Live conversation with the owner's key, plus Twitch co-hosting on a real channel and an Ollama model if wanted. Tune voice, reply length and latency from the diagnostics log.
+2. **Physical verification.** Real-microphone trials, wake false-accepts over 8 h, Notepad++ and Windows 11 Notepad, multi-monitor/DPI, speakers barge-in, and a screen-reader pass. Record results in `docs/benchmarks/`.
+3. **Microsoft Store listing.** Free for individual developers. It brings free signing, automatic updates and package identity, which unlocks Windows' online speech engine.
+4. **Paid hardening (owner approval).** A code-signing certificate for the direct installer, and browser-store listings for the extension.
+5. **Independent security review** of the broker, live authority, UIA, the browser bridge, Twitch input and the updater.
+6. **GPU-only extras, if the hardware allows.** Local voice cloning (e.g. Chatterbox, MIT) and 3D/anime avatars (VRM).
+7. **P7 expansion.** Office adapters, Urdu/mixed-language evaluation, and reusable approved workflows. Each needs its own acceptance suite.
