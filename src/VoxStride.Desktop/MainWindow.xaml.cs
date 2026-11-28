@@ -247,12 +247,14 @@ public partial class MainWindow : Window
     private void BuildProviderCards()
     {
         ProviderCards.Items.Clear();
-        foreach (var kind in new[] { ProviderKind.Claude, ProviderKind.Gemini, ProviderKind.OpenAI })
+        foreach (var kind in new[] { ProviderKind.Claude, ProviderKind.Gemini, ProviderKind.OpenAI, ProviderKind.Ollama })
         {
+            var local = kind == ProviderKind.Ollama;
             var hasKey = _app.Host!.Secrets.Load(ProviderSelector.SecretName(kind)) is { Length: > 0 };
             var panel = new StackPanel();
-            panel.Children.Add(new TextBlock { Text = kind switch { ProviderKind.Claude => "Claude", ProviderKind.Gemini => "Gemini", _ => "OpenAI" }, FontWeight = FontWeights.SemiBold, FontSize = 15 });
-            var status = new TextBlock { Text = hasKey ? "Key saved in Credential Manager" : "No key saved", Style = (Style)FindResource("Caption"), Margin = new Thickness(0, 2, 0, 8) };
+            panel.Children.Add(new TextBlock { Text = kind switch { ProviderKind.Claude => "Claude", ProviderKind.Gemini => "Gemini", ProviderKind.Ollama => "Offline AI (Ollama, on this PC)", _ => "OpenAI" }, FontWeight = FontWeights.SemiBold, FontSize = 15 });
+            if (local) panel.Children.Add(new TextBlock { Text = "Runs a model on your own PC with Ollama (ollama.com) — nothing leaves your computer. Needs a strong graphics card (8 GB+ video memory) to be quick. Download a model first, e.g. \"ollama pull qwen3:8b\". Real-time conversation still needs Gemini; offline uses the classic voice mode.", TextWrapping = TextWrapping.Wrap, Style = (Style)FindResource("Caption"), Margin = new Thickness(0, 2, 0, 4) });
+            var status = new TextBlock { Text = local ? (hasKey ? "Offline AI is set up" : "Not set up") : hasKey ? "Key saved in Credential Manager" : "No key saved", Style = (Style)FindResource("Caption"), Margin = new Thickness(0, 2, 0, 8) };
             panel.Children.Add(status);
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) });
@@ -261,11 +263,13 @@ public partial class MainWindow : Window
             grid.Children.Add(new TextBlock { Text = "Model", VerticalAlignment = VerticalAlignment.Center });
             var model = new ComboBox { IsEditable = true, ItemsSource = ProviderFactory.SuggestedModels(kind), Text = _app.Settings.Models.GetValueOrDefault(kind, ProviderFactory.DefaultModel(kind)), Margin = new Thickness(0, 2, 0, 2) };
             Grid.SetColumn(model, 1); grid.Children.Add(model);
-            var keyLabel = new TextBlock { Text = "API key", VerticalAlignment = VerticalAlignment.Center };
+            var keyLabel = new TextBlock { Text = local ? "Server" : "API key", VerticalAlignment = VerticalAlignment.Center };
             Grid.SetRow(keyLabel, 1); grid.Children.Add(keyLabel);
             var key = new PasswordBox { Margin = new Thickness(0, 2, 0, 2) };
+            var address = new TextBox { Margin = new Thickness(0, 2, 0, 2), Text = local ? (_app.Host!.Secrets.Load(ProviderSelector.SecretName(kind)) ?? OllamaProvider.DefaultBase.TrimEnd('/')) : "" };
             AutomationPropertiesHelper.SetName(key, kind + " API key");
-            Grid.SetRow(key, 1); Grid.SetColumn(key, 1); grid.Children.Add(key);
+            Control keyBox = local ? address : key;
+            Grid.SetRow(keyBox, 1); Grid.SetColumn(keyBox, 1); grid.Children.Add(keyBox);
             panel.Children.Add(grid);
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
             var save = new Button { Content = "Save", Style = (Style)FindResource("PrimaryButton") };
@@ -277,7 +281,13 @@ public partial class MainWindow : Window
             save.Click += (_, _) =>
             {
                 _app.Settings.Models[kind] = model.Text.Trim();
-                if (key.Password.Length > 0)
+                if (local)
+                {
+                    var server = OllamaProvider.ServerFrom(address.Text).ToString().TrimEnd('/');
+                    _app.Host!.Secrets.Save(ProviderSelector.SecretName(kind), server);
+                    status.Text = "Offline AI is set up"; Log.Info("app", $"offline AI (Ollama) set up at {server} model {model.Text.Trim()}");
+                }
+                else if (key.Password.Length > 0)
                 {
                     try { _app.Host!.Secrets.Save(ProviderSelector.SecretName(kind), key.Password.Trim()); key.Clear(); status.Text = "Key saved in Credential Manager"; Log.Info("app", $"{kind} API key saved (value never logged)"); }
                     catch (InvalidOperationException ex) { status.Text = ex.Message; }
@@ -290,7 +300,7 @@ public partial class MainWindow : Window
             };
             test.Click += async (_, _) =>
             {
-                var k = key.Password.Length > 0 ? key.Password.Trim() : _app.Host!.Secrets.Load(ProviderSelector.SecretName(kind));
+                var k = local ? OllamaProvider.ServerFrom(address.Text).ToString() : key.Password.Length > 0 ? key.Password.Trim() : _app.Host!.Secrets.Load(ProviderSelector.SecretName(kind));
                 if (string.IsNullOrEmpty(k)) { status.Text = "Enter a key first."; return; }
                 status.Text = "Testing…";
                 var r = await ProviderFactory.Create(new ProviderSettings(kind, model.Text.Trim(), k)).CheckAsync(CancellationToken.None);
@@ -323,7 +333,7 @@ public partial class MainWindow : Window
     private async Task RefreshUsageAsync()
     {
         var sb = new StringBuilder("Today's provider-reported usage: ");
-        foreach (var k in new[] { ProviderKind.Claude, ProviderKind.Gemini, ProviderKind.OpenAI })
+        foreach (var k in new[] { ProviderKind.Claude, ProviderKind.Gemini, ProviderKind.OpenAI, ProviderKind.Ollama })
         {
             var (i, o) = await _app.Host!.Store.GetUsageSinceAsync(new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero), k.ToString(), CancellationToken.None);
             sb.Append(CultureInfo.InvariantCulture, $"{k} {i:N0} in / {o:N0} out   ");

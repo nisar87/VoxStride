@@ -47,7 +47,7 @@ public sealed class ProviderSelector(AppSettings settings, CredentialSecretStore
         if (string.IsNullOrWhiteSpace(key)) return null;
         var since = DateTimeOffset.UtcNow.Date;
         var (i, o) = store.GetUsageSinceAsync(new DateTimeOffset(since, TimeSpan.Zero), kind.ToString(), CancellationToken.None).GetAwaiter().GetResult();
-        if (settings.DailyTokenBudget > 0 && i + o >= settings.DailyTokenBudget) return new BudgetExhaustedProvider(kind);
+        if (kind != ProviderKind.Ollama && settings.DailyTokenBudget > 0 && i + o >= settings.DailyTokenBudget) return new BudgetExhaustedProvider(kind); // local AI costs nothing
         var model = settings.Models.TryGetValue(kind, out var m) && !string.IsNullOrWhiteSpace(m) ? m : ProviderFactory.DefaultModel(kind);
         lock (_gate)
         {

@@ -2,7 +2,7 @@ using System.Text.Json.Nodes;
 
 namespace VoxStride.Contracts;
 
-public enum ProviderKind { Claude, OpenAI, Gemini }
+public enum ProviderKind { Claude, OpenAI, Gemini, Ollama }
 
 public enum ProviderErrorKind { Unauthorized, RateLimited, Timeout, Disconnected, InvalidRequest, Refused, Server, UnsupportedModel, BudgetExceeded, Unknown }
 

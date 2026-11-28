@@ -22,6 +22,11 @@ public partial class App
     private void SetUpCompanion()
     {
         var h = Host!;
+        // Offline / classic mode: the same character shows the classic pipeline when there's no Gemini key.
+        string? lastReply = null;
+        h.Conversation.StateChanged += s => Dispatcher.BeginInvoke(() => { if (Companion is null) _companionWindow?.ShowClassic(s, s == AgentState.Speaking ? lastReply : null); });
+        h.Conversation.TranscriptChanged += (f, i) => Dispatcher.BeginInvoke(() => { if (Companion is null) _companionWindow?.ShowClassicHeard((f + " " + i).Trim()); });
+        h.Events.Published += ev => { if (ev.State == AgentState.Speaking && ev.Message is { Length: > 0 } m && ev.Phase is not ("draft" or "waiting")) { lastReply = m; Dispatcher.BeginInvoke(() => { if (Companion is null) _companionWindow?.ShowClassic(AgentState.Speaking, m); }); } };
         h.LiveApprovals.Asking += q => Dispatcher.BeginInvoke(() => _companionWindow?.ShowQuestion(q.Title + " Say yes or no."));
         h.LiveApprovals.Answered += _ => Dispatcher.BeginInvoke(() => _companionWindow?.ClearQuestion());
         if (!Settings.LiveMode) { Log.Info("live", "live mode is off in settings"); return; }
@@ -40,6 +45,7 @@ public partial class App
             else if (other is null && _yieldMuted) { _yieldMuted = false; c.SetMicMuted(false); _companionWindow?.Attach(c); }
         });
         if (h.CanTalkLive && Settings.LiveStartListening && Settings.MicrophoneConsent && !_muted) _ = StartCompanionAsync();
+        else if (!h.CanTalkLive && Settings.ActiveProvider is not null) _companionWindow.ShowClassic(_muted ? AgentState.Muted : AgentState.Standby, null);
     }
 
     public async Task StartCompanionAsync()
@@ -110,6 +116,16 @@ public partial class App
             if (!_muted) await Host.StartWakeAsync();
         }
         Log.Info("live", "conversation ended: " + reason);
+    }
+
+    /// <summary>Classic voice mode from the character's mic button (no Gemini key: wake word / dictation / offline AI).</summary>
+    public void ClassicTalk() => TalkOrProceed();
+
+    public Task ClassicTypedAsync(string text)
+    {
+        Host?.Conversation.SubmitTyped(text);
+        _companionWindow?.ShowClassicHeard(text);
+        return Task.CompletedTask;
     }
 
     public Task ToggleCompanionAsync() => Companion is { IsOn: true } ? StopCompanionAsync("ended by the user") : StartCompanionAsync();

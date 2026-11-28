@@ -154,6 +154,50 @@ public partial class CompanionWindow : Window
         }
     });
 
+    /// <summary>
+    /// Offline / classic mode (no Gemini key): the character follows the classic voice pipeline — wake word, dictation
+    /// with "VoxStride, execute", local or Ollama AI, and the Windows voice.
+    /// </summary>
+    public void ShowClassic(AgentState s, string? reply)
+    {
+        if (_companion is not null) return;
+        var mapped = s switch
+        {
+            AgentState.Listening or AgentState.Finalizing => CompanionState.Hearing,
+            AgentState.Committed or AgentState.Planning => CompanionState.Thinking,
+            AgentState.Executing or AgentState.Verifying => CompanionState.Working,
+            AgentState.AwaitingApproval or AgentState.Clarifying => CompanionState.AwaitingYes,
+            AgentState.Speaking => CompanionState.Speaking,
+            AgentState.Failed => CompanionState.Error,
+            AgentState.Muted => CompanionState.Listening,
+            _ => CompanionState.Off,
+        };
+        ApplyState(mapped);
+        StatusText.Text = s switch
+        {
+            AgentState.Standby => "Say \"Hey VoxStride\" or click the mic",
+            AgentState.Listening => "Listening — say \"VoxStride, execute\" when you're done",
+            AgentState.Finalizing => "Finishing your sentence…",
+            AgentState.Clarifying => "Say \"yes\" to go ahead",
+            AgentState.AwaitingApproval => "Needs your OK",
+            AgentState.Muted => "Mic muted — click the mic to talk",
+            AgentState.Failed => "Couldn't finish that",
+            _ => StatusText.Text,
+        };
+        if (s == AgentState.Muted) { MicButton.Background = new SolidColorBrush(Color.FromRgb(0xE5, 0x48, 0x4D)); MicGlyph.Text = "\uEC54"; }
+        else if (s == AgentState.Standby) { MicButton.Background = new SolidColorBrush(Color.FromRgb(0x7C, 0x5C, 0xFF)); MicGlyph.Text = "\uE720"; MicButton.ToolTip = "Talk (Ctrl+Alt+V)"; }
+        if (reply is { Length: > 0 })
+        {
+            BubbleText.Text = reply;
+            AskButtons.Visibility = Visibility.Collapsed;
+            Bubble.Visibility = Visibility.Visible;
+            _bubbleTimer.Stop(); _bubbleTimer.Start();
+        }
+    }
+
+    public void ShowClassicHeard(string text) { if (_companion is null && Input.Text.Length == 0 && text.Length > 0) Placeholder.Text = "You: " + text; }
+
+
     private void ShowUnavailable()
     {
         _state = CompanionState.Off;
@@ -224,7 +268,8 @@ public partial class CompanionWindow : Window
     private void Animate(object? sender, EventArgs e)
     {
         if (!IsVisible) return;
-        var busy = _state is CompanionState.Hearing or CompanionState.Speaking or CompanionState.Thinking or CompanionState.Working or CompanionState.AwaitingYes or CompanionState.Connecting or CompanionState.Reconnecting;
+        var busy = _state is CompanionState.Hearing or CompanionState.Speaking or CompanionState.Thinking or CompanionState.Working or CompanionState.AwaitingYes or CompanionState.Connecting or CompanionState.Reconnecting
+            || _companion is null && _app.Host?.Speech?.IsSpeaking == true;
         var wanted = TimeSpan.FromMilliseconds(busy ? 40 : 150); // 25 fps when something is happening, ~7 fps at rest
         if (_frame.Interval != wanted) _frame.Interval = wanted;
         var t = (DateTime.UtcNow - _start).TotalSeconds;
@@ -270,7 +315,9 @@ public partial class CompanionWindow : Window
         BrowRUp.Y = Ease(BrowRUp.Y, _state is CompanionState.Thinking ? -4.0 : browTarget, 0.3, 0.1);
 
         // lip sync with VoxStride's own voice
-        var level = _forcedMouth ?? (_state == CompanionState.Speaking || _companion?.OutputLevel > 0.02 ? _companion?.OutputLevel ?? 0 : 0);
+        var classicTalking = _companion is null && _app.Host?.Speech?.IsSpeaking == true; // classic mode: the Windows voice is talking
+        var level = _forcedMouth ?? (classicTalking ? 0.25 + 0.35 * Math.Abs(Math.Sin(t * 11) * Math.Sin(t * 4.3))
+            : _state == CompanionState.Speaking || _companion?.OutputLevel > 0.02 ? _companion?.OutputLevel ?? 0 : 0);
         _mouth = _forcedMouth ?? Ease(_mouth, level, level > _mouth ? 0.6 : 0.3, 0.02);
         if (_mouth > 0.04)
         {
@@ -362,7 +409,12 @@ public partial class CompanionWindow : Window
 
     private void Mic_Click(object sender, RoutedEventArgs e)
     {
-        if (_app.Host?.CanTalkLive != true) { _app.ShowMain(3); return; }
+        if (_app.Host?.CanTalkLive != true)
+        {
+            if (_app.Settings.ActiveProvider is null) { _app.ShowMain(3); return; } // nothing to talk to yet
+            _app.ClassicTalk();                                                     // offline / classic voice mode
+            return;
+        }
         if (_companion?.IsOn == true) _app.ToggleCompanionMute();
         else _ = _app.StartCompanionAsync();
     }
@@ -380,6 +432,7 @@ public partial class CompanionWindow : Window
         var text = Input.Text.Trim();
         if (text.Length == 0) return;
         Input.Text = "";
+        if (_app.Host?.CanTalkLive != true) { await _app.ClassicTypedAsync(text); return; }
         if (_companion?.IsOn != true) await _app.StartCompanionAsync();
         if (_companion is { IsOn: true } c) await c.SendTextAsync(text);
     }
